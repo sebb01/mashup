@@ -8,6 +8,7 @@ import os
 import simpleaudio as sa
 import json
 import pathlib
+from collections import defaultdict
 
 NS_IN_ONE_SECOND = 1000000000
 TRACK_PATHS = [file for file in pathlib.Path("songs").rglob("*") if os.path.isfile(file)]
@@ -40,8 +41,10 @@ class Track:
         self.pitchless = pitchless
         self.wav = wav
         self.sr = sr
-        if self.string is None:
-            Exception("Tried to initialize a general Track object; initialize a Track subclass instead")
+        try:
+            self.string
+        except AttributeError:
+            self.string = "Track"
             
         if wav is None:
             if path == None:
@@ -53,7 +56,8 @@ class Track:
             pass # pitchless is assumed to be a bool if not iterable
         else:
             pitchless = self.string in ls # pitchless is true iff the trackType is included in the pitchless list
-            
+        
+
     def __repr__(self):
         return f"{self.string} of {self.song_name}"
     
@@ -81,16 +85,25 @@ class Vocals(Track):
         super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
         
 class Mashup:
-    def __init__(self, wav, name, sr=44100):
+    def __init__(self, wav, tracks, sr=44100):
         self.wav = wav
-        self.name = name
+        self.tracks = tracks
+        self.name = make_mashup_name(tracks)
         self.sr = sr
+        for track in self.tracks:
+            track.wav = None    # Purge track wavs to hopefully free memory
         
     def __repr__(self):
         return self.name
     
     def __str__(self):
         return self.__repr__()
+
+    def description(self):
+        s = f"{self.name}\n"
+        for track in self.tracks:
+            s = s + f"{track.string}: {track.song_name}\n"
+        return s
         
     
 def add_wav_list(wavs):
@@ -113,7 +126,12 @@ def find_middle_bpm(tracks):
     return np.mean(tempi)
 
 def find_middle_key(tracks):
-    keys = [track.key.value for track in tracks]
+    keys = []
+    for track in tracks:
+        if not track.pitchless:
+            keys.append(track.key.value)
+    if len(keys) <= 0:
+        return 0
     return Key(int(np.mean(keys)))
 
 def add_wavs(wav1, wav2):
@@ -128,8 +146,10 @@ def add_wavs(wav1, wav2):
     return shorter + longer
     
 def transpose_track(track, new_key):
+    if track.pitchless:
+        return track
     semitones = new_key.value - track.key.value % 12
-    print(f"Transposing {track} by {semitones} semitones to {new_key}...")
+    #print(f"Transposing {track} by {semitones} semitones to {new_key}...")
     new_wav = pyrb.pitch_shift(track.wav, track.sr, semitones)
     trackType = globals()[track.string]
     return trackType(track.song_name, track.bpm, new_key, track.mode, wav=new_wav, sr=track.sr)
@@ -143,6 +163,19 @@ def play_wav_array(array, sr):
     # returns sa.PlayObject
     return waveObject.play()      
 
+def merge_same_bpm_and_key(tracks):
+    new_tracks = []
+    groups = defaultdict(list)
+    for track in tracks:
+        groups[(track.bpm, track.key)].append(track)
+    for group in groups.values():
+        if len(group) <= 1:
+            new_tracks.append(group[0])
+            continue
+        new_wav = add_wav_list([track.wav for track in group])
+        new_tracks.append(Track("N/A (Merged Track)", group[0].bpm, group[0].key, group[0].mode, wav=new_wav))
+    return new_tracks
+
 # song_length: Fraction of 32 bars for the desired song length
 # returns Mashup object
 def mashup_tracks(tracks, new_bpm=None, new_key=None, song_length=0.5):
@@ -150,15 +183,21 @@ def mashup_tracks(tracks, new_bpm=None, new_key=None, song_length=0.5):
         new_bpm = find_middle_bpm(tracks)
     if new_key is None:
         new_key = find_middle_key(tracks)
-    new_tracks = []
+
+    original_tracks = tracks.copy()
+    tracks = merge_same_bpm_and_key(tracks)
+    transposed = []
     for track in tracks:
         track.wav = track.wav[:int(song_length*len(track.wav))]
-        transposed = transpose_track(track, new_key)
-        transposed_stretched = stretch_track(transposed, new_bpm)
-        new_tracks.append(transposed_stretched)
-    mashup_wav = add_wav_list([track.wav for track in new_tracks])
-    mashup_name = make_mashup_name(new_tracks)
-    return Mashup(mashup_wav, mashup_name)
+        transposed.append(transpose_track(track, new_key))
+    transposed = merge_same_bpm_and_key(transposed)
+
+    transposed_stretched = []
+    for track in transposed:
+        transposed_stretched.append(stretch_track(track, new_bpm))
+
+    mashup_wav = add_wav_list([track.wav for track in transposed_stretched])
+    return Mashup(mashup_wav, original_tracks)
 
 def instr_acapella_mashup(instr, acap):
     # TODO
@@ -228,10 +267,19 @@ def load_track(file):
     return trackType(s["name"], s["bpm"], Key(s["key"]), s["mode"], pitchless=pitchless, path=file)
     
 
+'''
 mashup = random_mashup()
 while True:
     playObject = play_wav_array(mashup.wav, mashup.sr)
-    print(f"Now playing: {mashup}")
+    print(f"Now playing: {mashup.description()}")
     mashup = random_mashup()
     # TODO eliminate the delay between tracks
     playObject.wait_done()
+'''
+sad_drums = load_track("songs/sad but/drums.wav")
+sad_other = load_track("songs/sad but/other.wav")
+sad_bass = load_track("songs/sad but/bass.wav")
+inter = load_track("songs/interior crocodile/vocals.wav")
+mashup = mashup_tracks([sad_drums, sad_other, sad_bass, inter])
+playObject = play_wav_array(mashup.wav, mashup.sr)
+playObject.wait_done()
