@@ -9,35 +9,21 @@ import simpleaudio as sa
 import json
 import pathlib
 from collections import defaultdict
+import warnings
 
 NS_IN_ONE_SECOND = 1000000000
 TRACK_PATHS = [file for file in pathlib.Path("songs").rglob("*") if os.path.isfile(file)]
 SONG_PATHS = [os.path.join("songs", p) for p in os.listdir("songs") if not os.path.isfile(p)]
 
-class Key(Enum):
-    A = 0
-    Bb = 1
-    B = 2
-    C = 3
-    Db = 4
-    D = 5
-    Eb = 6
-    E = 7
-    F = 8
-    Gb = 9
-    G = 10
-    Ab = 11
-    
-class Mode(Enum):
-    Major = 0
-    Minor = 1
+KEYS = {'A':0, 'Bb':1, 'B':2, 'C':3, 'Db':4, 'D':5, 'Eb':6, 'E':7, 'F':8, 'Gb':9, 'G':10, 'Ab': 11}
+MODES = ('Minor', 'Major')
     
 class Track:
     def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None):
         self.song_name = song_name
         self.bpm = bpm
         self.key = key
-        self.mode = mode
+        self.mode = mode.capitalize()
         self.pitchless = pitchless
         self.wav = wav
         self.sr = sr
@@ -45,6 +31,10 @@ class Track:
             self.string
         except AttributeError:
             self.string = "Track"
+
+        if mode not in MODES:
+            warnings.warn(f'''WARNING: \"{mode}\" is neither Major nor Minor. Track {self.string} of \"{self.song_name}\"
+                will only be mashed up with other tracks that use the \"{mode}\" mode.''')
             
         if wav is None:
             if path == None:
@@ -129,10 +119,10 @@ def find_middle_key(tracks):
     keys = []
     for track in tracks:
         if not track.pitchless:
-            keys.append(track.key.value)
+            keys.append(track.key)
     if len(keys) <= 0:
         return 0
-    return Key(int(np.mean(keys)))
+    return int(np.mean(keys))
 
 def add_wavs(wav1, wav2):
     shorter = wav1
@@ -148,7 +138,7 @@ def add_wavs(wav1, wav2):
 def transpose_track(track, new_key):
     if track.pitchless:
         return track
-    semitones = new_key.value - track.key.value % 12
+    semitones = new_key - track.key % 12
     #print(f"Transposing {track} by {semitones} semitones to {new_key}...")
     new_wav = pyrb.pitch_shift(track.wav, track.sr, semitones)
     trackType = globals()[track.string]
@@ -254,20 +244,35 @@ def load_random_track(track_type = None):
             return load_track(path)
     raise Exception(f'No tracks of type \"{track_type}\" were found')
 
+def get_optional_values(song_dict):
+    try:
+        key = song_dict["key"]
+    except KeyError:
+        key = "A"
+
+    try:
+        mode = song_dict["mode"]
+    except KeyError:
+        mode = "Minor"
+
+    try:
+        pitchless = song_dict["pitchless"]
+    except KeyError:
+        pitchless = ["Drums"]
+
+    return key, mode, pitchless
+
 def load_track(file):
     directory = os.path.split(file)[0]
     with open(os.path.join(directory, "info.json")) as info_file:
         s = json.load(info_file)
     trackstring = get_track_string(file)
     trackType = globals()[trackstring]
-    try:
-        pitchless = s["pitchless"]
-    except KeyError:
-        pitchless = ["Drums"] # If the pitchless key is missing, the default case is assumed
-    return trackType(s["name"], s["bpm"], Key(s["key"]), s["mode"], pitchless=pitchless, path=file)
+    key, mode, pitchless = get_optional_values(s)
+    return trackType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file)
     
 
-'''
+
 mashup = random_mashup()
 while True:
     playObject = play_wav_array(mashup.wav, mashup.sr)
@@ -275,11 +280,13 @@ while True:
     mashup = random_mashup()
     # TODO eliminate the delay between tracks
     playObject.wait_done()
+
 '''
-sad_drums = load_track("songs/sad but/drums.wav")
-sad_other = load_track("songs/sad but/other.wav")
-sad_bass = load_track("songs/sad but/bass.wav")
-inter = load_track("songs/interior crocodile/vocals.wav")
-mashup = mashup_tracks([sad_drums, sad_other, sad_bass, inter])
+drums = load_track("songs/sanctuary/drums.wav")
+other = load_track("songs/sanctuary/other.wav")
+bass = load_track("songs/beat it/bass.wav")
+vocals = load_track("songs/sanctuary/vocals.wav")
+mashup = mashup_tracks([drums, other, bass, vocals])
 playObject = play_wav_array(mashup.wav, mashup.sr)
 playObject.wait_done()
+'''
