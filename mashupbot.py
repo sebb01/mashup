@@ -37,7 +37,7 @@ class Track:
                 Exception("Track object needs to be passed either path to a directory or raw audio array")
             self.wav, self.sr = sf.read(str(path))
         try:
-            ls = list(pitchless)
+            ls = [string.capitalize() for string in pitchless]
         except TypeError:
             pass # pitchless is assumed to be a bool if not iterable
         else:
@@ -157,7 +157,10 @@ def merge_same_bpm_and_key(tracks):
     new_tracks = []
     groups = defaultdict(list)
     for track in tracks:
-        groups[(track.bpm, track.key)].append(track)
+        key = track.key
+        if track.pitchless:
+            key = 'pitchless'
+        groups[(track.bpm, key)].append(track)
     for group in groups.values():
         if len(group) <= 1:
             new_tracks.append(group[0])
@@ -281,14 +284,19 @@ def infinite_random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], b
         # TODO eliminate the delay between tracks
         playObject.wait_done()
 
-infinite_random_mashup(bpm = 110, key = KEYS["Db"], song_length=0.25)
-'''
+#infinite_random_mashup(bpm = 110, key = KEYS["Db"], song_length=0.125)
 
-drums = load_track("songs/sanctuary/drums.wav")
-other = load_track("songs/sanctuary/other.wav")
-bass = load_track("songs/beat it/bass.wav")
-vocals = load_track("songs/sanctuary/vocals.wav")
-mashup = mashup_tracks([drums, other, bass, vocals])
+
+
+drums = load_track("songs/psychosocial verse/drums.wav")
+other = load_track("songs/psychosocial verse/other.wav")
+bass = load_track("songs/psychosocial verse/bass.wav")
+vocals = load_track("songs/psychosocial verse/vocals.wav")
+
+drums2 = load_track("songs/beat it/drums.wav")
+other2 = load_track("songs/beat it/other.wav")
+bass2 = load_track("songs/beat it/bass.wav")
+mashup = mashup_tracks([drums2, other, other2, bass2, vocals])
 playObject = play_wav_array(mashup.wav, mashup.sr)
 playObject.wait_done()
-'''
+
