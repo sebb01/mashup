@@ -31,10 +31,6 @@ class Track:
             self.string
         except AttributeError:
             self.string = "Track"
-
-        if mode not in MODES:
-            warnings.warn(f'''WARNING: \"{mode}\" is neither Major nor Minor. Track {self.string} of \"{self.song_name}\"
-                will only be mashed up with other tracks that use the \"{mode}\" mode.''')
             
         if wav is None:
             if path == None:
@@ -45,7 +41,11 @@ class Track:
         except TypeError:
             pass # pitchless is assumed to be a bool if not iterable
         else:
-            pitchless = self.string in ls # pitchless is true iff the trackType is included in the pitchless list
+            self.pitchless = self.string in ls # pitchless is true iff the trackType is included in the pitchless list
+
+        if not self.pitchless and self.mode not in MODES:
+            warnings.warn(f'\"{self.mode}\" is neither Major nor Minor. Track \"{self.string}\" of \"{self.song_name}\" '+
+                f'will only be mashed up with other tracks that use the \"{self.mode}\" mode.')
         
 
     def __repr__(self):
@@ -280,8 +280,8 @@ while True:
     mashup = random_mashup()
     # TODO eliminate the delay between tracks
     playObject.wait_done()
-
 '''
+
 drums = load_track("songs/sanctuary/drums.wav")
 other = load_track("songs/sanctuary/other.wav")
 bass = load_track("songs/beat it/bass.wav")
