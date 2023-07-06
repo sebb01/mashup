@@ -272,14 +272,16 @@ def load_track(file):
     return trackType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file)
     
 
+def infinite_random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length = 0.5):
+    mashup = random_mashup(track_types, bpm, key, song_length)
+    while True:
+        playObject = play_wav_array(mashup.wav, mashup.sr)
+        print(f"Now playing: {mashup.description()}")
+        mashup = random_mashup(track_types, bpm, key, song_length)
+        # TODO eliminate the delay between tracks
+        playObject.wait_done()
 
-mashup = random_mashup()
-while True:
-    playObject = play_wav_array(mashup.wav, mashup.sr)
-    print(f"Now playing: {mashup.description()}")
-    mashup = random_mashup()
-    # TODO eliminate the delay between tracks
-    playObject.wait_done()
+infinite_random_mashup(bpm = 110, key = KEYS["Db"], song_length=0.25)
 '''
 
 drums = load_track("songs/sanctuary/drums.wav")
