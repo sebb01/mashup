@@ -1,5 +1,3 @@
-# TODO: accept 2-track stems (acapella, instrumental)
-
 import soundfile as sf
 import pyrubberband as pyrb
 from enum import Enum
@@ -11,10 +9,9 @@ import pathlib
 from collections import defaultdict
 import warnings
 
-NS_IN_ONE_SECOND = 1000000000
-TRACK_PATHS = [file for file in pathlib.Path("songs").rglob("*") if os.path.isfile(file)]
-SONG_PATHS = [os.path.join("songs", p) for p in os.listdir("songs") if not os.path.isfile(p)]
-
+SONGDIR = "songs"
+TRACK_PATHS = [file for file in pathlib.Path(SONGDIR).rglob("*") if os.path.isfile(file)]
+SONG_PATHS = [os.path.join(SONGDIR, p) for p in os.listdir(SONGDIR) if not os.path.isfile(p)]
 KEYS = {'A':0, 'Bb':1, 'B':2, 'C':3, 'Db':4, 'D':5, 'Eb':6, 'E':7, 'F':8, 'Gb':9, 'G':10, 'Ab': 11}
 MODES = ('Minor', 'Major')
     
@@ -53,6 +50,12 @@ class Track:
     
     def __str__(self):
         return self.__repr__()
+
+    def __eq__(self, o):
+        return self.__str__() == o.__str__()
+
+    def __ne__(self, o):
+        return not self.__eq__(o)
 
 class Drums(Track):
     def __init__(self, song_name, bpm, key=None, mode=None, pitchless=True, wav=None, sr=44100, path=None):
@@ -171,30 +174,34 @@ def merge_same_bpm_and_key(tracks):
 
 # song_length: Fraction of 32 bars for the desired song length
 # returns Mashup object
-def mashup_tracks(tracks, new_bpm=None, new_key=None, song_length=0.5):
-    if new_bpm is None:
-        new_bpm = find_middle_bpm(tracks)
-    if new_key is None:
-        new_key = find_middle_key(tracks)
+def mashup_tracks(tracks, bpm=None, key=None, song_length=0.5):
+    if bpm is None:
+        bpm = find_middle_bpm(tracks)
+    if key is None:
+        key = find_middle_key(tracks)
 
     original_tracks = tracks.copy()
     tracks = merge_same_bpm_and_key(tracks)
     transposed = []
     for track in tracks:
         track.wav = track.wav[:int(song_length*len(track.wav))]
-        transposed.append(transpose_track(track, new_key))
+        transposed.append(transpose_track(track, key))
     transposed = merge_same_bpm_and_key(transposed)
 
     transposed_stretched = []
     for track in transposed:
-        transposed_stretched.append(stretch_track(track, new_bpm))
+        transposed_stretched.append(stretch_track(track, bpm))
 
     mashup_wav = add_wav_list([track.wav for track in transposed_stretched])
     return Mashup(mashup_wav, original_tracks)
 
-def instr_acapella_mashup(instr, acap):
-    # TODO
-    pass
+def instr_acapella_mashup(instr, acap, bpm=None, key=None, song_length=1):
+    drums = load_track(os.path.join(SONGDIR, instr, "drums.wav"))
+    other = load_track(os.path.join(SONGDIR, instr, "other.wav"))
+    bass = load_track(os.path.join(SONGDIR, instr, "bass.wav"))
+    vocals = load_track(os.path.join(SONGDIR, acap, "vocals.wav"))
+
+    return mashup_tracks([drums, other, bass, vocals], bpm, key, song_length)
 
 '''
 # Make a random mashup
@@ -216,10 +223,14 @@ def semi_random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], nr_di
 '''
     
     
-def random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length = 0.5):
+def random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=0.5, allow_duplicates=False):
     tracks = []
     for track_type in track_types:
-        tracks.append(load_random_track(track_type))
+        track = load_random_track(track_type)
+        if not allow_duplicates:
+            while (track in tracks):
+                track = load_random_track(track_type)
+        tracks.append(track)
     return mashup_tracks(tracks, bpm, key, song_length)
 
 def make_mashup_name(tracks):
@@ -275,28 +286,33 @@ def load_track(file):
     return trackType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file)
     
 
-def infinite_random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length = 0.5):
-    mashup = random_mashup(track_types, bpm, key, song_length)
+def infinite_random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=0.5, allow_duplicates=False):
+    mashup = random_mashup(track_types, bpm, key, song_length, allow_duplicates)
     while True:
         playObject = play_wav_array(mashup.wav, mashup.sr)
         print(f"Now playing: {mashup.description()}")
-        mashup = random_mashup(track_types, bpm, key, song_length)
+        mashup = random_mashup(track_types, bpm, key, song_length, allow_duplicates)
         # TODO eliminate the delay between tracks
         playObject.wait_done()
 
-#infinite_random_mashup(bpm = 110, key = KEYS["Db"], song_length=0.125)
+def play_mashup(mashup, print_info = True):
+    if print_info:
+        print(f"Now playing: {mashup.description()}")
+    playObject = play_wav_array(mashup.wav, mashup.sr)
+    playObject.wait_done()
 
+infinite_random_mashup(song_length=1/4, bpm=110, track_types=["Vocals", "Vocals", "Vocals"])
 
+'''
+acap = "interior crocodile"
+instr = "psychosocial verse"
+mashup = instr_acapella_mashup(instr, acap)
+play_mashup(mashup)
+'''
 
-drums = load_track("songs/psychosocial verse/drums.wav")
-other = load_track("songs/psychosocial verse/other.wav")
-bass = load_track("songs/psychosocial verse/bass.wav")
-vocals = load_track("songs/psychosocial verse/vocals.wav")
-
-drums2 = load_track("songs/beat it/drums.wav")
-other2 = load_track("songs/beat it/other.wav")
-bass2 = load_track("songs/beat it/bass.wav")
-mashup = mashup_tracks([drums2, other, other2, bass2, vocals])
-playObject = play_wav_array(mashup.wav, mashup.sr)
-playObject.wait_done()
-
+drums = load_track(os.path.join(SONGDIR, "the less", "drums.wav"))
+other = load_track(os.path.join(SONGDIR, "beat it", "other.wav"))
+bass = load_track(os.path.join(SONGDIR, "psychosocial chorus", "bass.wav"))
+vocals = load_track(os.path.join(SONGDIR, "psychosocial chorus", "vocals.wav"))
+mashup = mashup_tracks([drums, other, bass, vocals])
+play_mashup(mashup)
