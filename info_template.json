@@ -1,0 +1,7 @@
+{
+	"name": "Song name here",
+	"bpm": 137,
+	"key": "Eb",
+	"mode": "Minor",
+	"pitchless": ["drums", "vocals"]
+}

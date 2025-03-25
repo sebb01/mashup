@@ -301,18 +301,22 @@ def play_mashup(mashup, print_info = True):
     playObject = play_wav_array(mashup.wav, mashup.sr)
     playObject.wait_done()
 
-infinite_random_mashup(song_length=1/4, bpm=110, track_types=["Vocals", "Vocals", "Vocals"])
+def main():
+    infinite_random_mashup(song_length=1/4, bpm=110, track_types=["Vocals", "Vocals", "Vocals"])
 
-'''
-acap = "interior crocodile"
-instr = "psychosocial verse"
-mashup = instr_acapella_mashup(instr, acap)
-play_mashup(mashup)
-'''
+    '''
+    acap = "interior crocodile"
+    instr = "psychosocial verse"
+    mashup = instr_acapella_mashup(instr, acap)
+    play_mashup(mashup)
+    '''
 
-drums = load_track(os.path.join(SONGDIR, "the less", "drums.wav"))
-other = load_track(os.path.join(SONGDIR, "beat it", "other.wav"))
-bass = load_track(os.path.join(SONGDIR, "psychosocial chorus", "bass.wav"))
-vocals = load_track(os.path.join(SONGDIR, "psychosocial chorus", "vocals.wav"))
-mashup = mashup_tracks([drums, other, bass, vocals])
-play_mashup(mashup)
+    drums = load_track(os.path.join(SONGDIR, "the less", "drums.wav"))
+    other = load_track(os.path.join(SONGDIR, "beat it", "other.wav"))
+    bass = load_track(os.path.join(SONGDIR, "psychosocial chorus", "bass.wav"))
+    vocals = load_track(os.path.join(SONGDIR, "psychosocial chorus", "vocals.wav"))
+    mashup = mashup_tracks([drums, other, bass, vocals])
+    play_mashup(mashup)
+
+if __name__ == "__main__":
+    main()
