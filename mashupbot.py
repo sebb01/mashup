@@ -2,12 +2,17 @@ import soundfile as sf
 import pyrubberband as pyrb
 from enum import Enum
 import numpy as np
+from numpy import ndarray
 import os
 import simpleaudio as sa
 import json
 import pathlib
 from collections import defaultdict
+from collections.abc import Iterable
 import warnings
+
+# TODO: Replace all occurences of "track" with "stem". that's a lot less confusing
+# TODO: maybe make the song name attribute in info.json not forced unique by using a hash of the wave as ID instead? not sure
 
 SONGDIR = "songs"
 TRACK_PATHS = [file for file in pathlib.Path(SONGDIR).rglob("*") if os.path.isfile(file)]
@@ -16,6 +21,7 @@ KEYS = {'A':0, 'Bb':1, 'B':2, 'C':3, 'Db':4, 'D':5, 'Eb':6, 'E':7, 'F':8, 'Gb':9
 MODES = ('Minor', 'Major')
     
 class Track:
+    """Class that holds the audio data and attributes of one stem of a song"""
     def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None):
         self.song_name = song_name
         self.bpm = bpm
@@ -78,6 +84,8 @@ class Vocals(Track):
         super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
         
 class Mashup:
+    # TODO: Make this a subclass of Track
+    """Class that holds the audio data and attributes of a mashup."""
     def __init__(self, wav, tracks, sr=44100):
         self.wav = wav
         self.tracks = tracks
@@ -99,26 +107,39 @@ class Mashup:
         return s
         
     
-def add_wav_list(wavs):
+def sum_wav_list(wavs: Iterable[ndarray]) -> ndarray:
+    """Sum a list of audio arrays into one audio array"""
     accu = wavs[0]
     if len(wavs) <= 1:
         return accu
     for wav in wavs[1:]:
-        accu = add_wavs(accu, wav)
+        accu = sum_wavs(accu, wav)
     return accu
     
-def stretch_track(track, new_bpm):
+def stretch_track(track: type[Track], new_bpm) -> type[Track]:
+    """Stretch a track to a new BPM"""
     old_bpm = track.bpm
     ratio = new_bpm/old_bpm
     wav_stretch = pyrb.time_stretch(track.wav, track.sr, ratio)
-    trackType = globals()[track.string]
+    trackType = get_track_type(track)
     return trackType(track.song_name, new_bpm, track.key, track.mode, wav=wav_stretch, sr=track.sr)
 
-def find_middle_bpm(tracks):
+def get_track_type(track: type[Track]) -> type:
+    """Get the type of stem of a track"""
+    try:
+        return globals()[track.string]
+    except:
+        return Track
+
+def find_middle_bpm(tracks: Iterable[type[Track]]) -> float:
+    """Find the mean BPM in a list of tracks"""
+    # TODO: maybe median is better
     tempi = [track.bpm for track in tracks]
     return np.mean(tempi)
 
-def find_middle_key(tracks):
+def find_middle_key(tracks: Iterable[type[Track]]) -> int:
+    """Find the key that has minimal distance to all tracks in a list"""
+    # TODO: mean makes no sense since it wraps around after 11, i should use something else
     keys = []
     for track in tracks:
         if not track.pitchless:
@@ -127,7 +148,8 @@ def find_middle_key(tracks):
         return 0
     return int(np.mean(keys))
 
-def add_wavs(wav1, wav2):
+def sum_wavs(wav1: ndarray, wav2: ndarray) -> ndarray:
+    """Sum two audio arrays"""
     shorter = wav1
     longer = wav2
     if len(wav1) > len(wav2):
@@ -138,16 +160,17 @@ def add_wavs(wav1, wav2):
         shorter = np.pad(shorter, ((0, diff), (0, 0)))
     return shorter + longer
     
-def transpose_track(track, new_key):
+def transpose_track(track: type[Track], new_key: int) -> type[Track]:
+    """Transpose a track to a new key, unless the track is marked as pitchless"""
     if track.pitchless:
         return track
     semitones = new_key - track.key % 12
     #print(f"Transposing {track} by {semitones} semitones to {new_key}...")
     new_wav = pyrb.pitch_shift(track.wav, track.sr, semitones)
-    trackType = globals()[track.string]
+    trackType = get_track_type(track)
     return trackType(track.song_name, track.bpm, new_key, track.mode, wav=new_wav, sr=track.sr)
 
-def play_wav_array(array, sr):
+def play_wav_array(array: ndarray, sr: int):
     # normalize to 16bit
     array *= 32767 / np.max(np.abs(array))
     # cast to 16bit
@@ -156,7 +179,7 @@ def play_wav_array(array, sr):
     # returns sa.PlayObject
     return waveObject.play()      
 
-def merge_same_bpm_and_key(tracks):
+def merge_same_bpm_and_key(tracks: Iterable[type[Track]]) -> list[Track]:
     new_tracks = []
     groups = defaultdict(list)
     for track in tracks:
@@ -168,13 +191,13 @@ def merge_same_bpm_and_key(tracks):
         if len(group) <= 1:
             new_tracks.append(group[0])
             continue
-        new_wav = add_wav_list([track.wav for track in group])
+        new_wav = sum_wav_list([track.wav for track in group])
         new_tracks.append(Track("N/A (Merged Track)", group[0].bpm, group[0].key, group[0].mode, wav=new_wav))
     return new_tracks
 
-# song_length: Fraction of 32 bars for the desired song length
-# returns Mashup object
-def mashup_tracks(tracks, bpm=None, key=None, song_length=0.5):
+
+def mashup_tracks(tracks: Iterable[type[Track]], bpm=None, key:int=None, song_length:float=0.5) -> Mashup:
+    """`song_length`: Desired mashup length as a fraction of 32 bars"""
     if bpm is None:
         bpm = find_middle_bpm(tracks)
     if key is None:
@@ -192,10 +215,11 @@ def mashup_tracks(tracks, bpm=None, key=None, song_length=0.5):
     for track in transposed:
         transposed_stretched.append(stretch_track(track, bpm))
 
-    mashup_wav = add_wav_list([track.wav for track in transposed_stretched])
+    mashup_wav = sum_wav_list([track.wav for track in transposed_stretched])
     return Mashup(mashup_wav, original_tracks)
 
-def instr_acapella_mashup(instr, acap, bpm=None, key=None, song_length=1):
+def instr_acapella_mashup(instr:str, acap:str, bpm=None, key:int=None, song_length:float=1):
+    """`song_length`: Desired mashup length as a fraction of 32 bars"""
     drums = load_track(os.path.join(SONGDIR, instr, "drums.wav"))
     other = load_track(os.path.join(SONGDIR, instr, "other.wav"))
     bass = load_track(os.path.join(SONGDIR, instr, "bass.wav"))
@@ -293,6 +317,7 @@ def infinite_random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], b
         print(f"Now playing: {mashup.description()}")
         mashup = random_mashup(track_types, bpm, key, song_length, allow_duplicates)
         # TODO eliminate the delay between tracks
+        # TODO skip button
         playObject.wait_done()
 
 def play_mashup(mashup, print_info = True):
@@ -302,7 +327,7 @@ def play_mashup(mashup, print_info = True):
     playObject.wait_done()
 
 def main():
-    infinite_random_mashup(song_length=1/4, bpm=110, track_types=["Vocals", "Vocals", "Vocals"])
+    infinite_random_mashup(song_length=1/4, bpm=110)
 
     '''
     acap = "interior crocodile"

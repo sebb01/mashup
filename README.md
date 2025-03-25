@@ -1,16 +1,18 @@
-## Import your own stems
-- Make a folder in the `\songs` folder
+## How to import your own stems
+- Make a folder inside of the `\songs` folder
 - Drop stem(s) as .wav file(s) into this folder. Each stem should be named either:
     - `bass.wav`
     - `drums.wav`
-    - `other.wav`
     - `vocals.wav`
+    - `other.wav`
+
+    - The stem file can also have any other name, but then it will only be included in a mashup when the `track_types` argument is passed and the track name is included in that list
 - Make an `info.json` file in this folder
 
 ### `info.json` file format
 You can look at `info_template.json` to see how to format your file. The following fields must be defined:
-- `name (string)`: Name of the track
-- `bpm (numerical)`: Tempo (BPM) of the track
+- `name (string)`: Name of the song (must be unique!)
+- `bpm (numerical)`: Tempo (BPM) of the song
 
 I highly recommend to also define the following fields whenever applicable:
 - `key (string)`: Key of the song, for example "Eb"
