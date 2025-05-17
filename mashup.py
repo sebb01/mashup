@@ -31,7 +31,6 @@ class Stem:
         self.bpm = bpm
         self.key = key
         self.mode = mode.capitalize()
-        self.pitchless = pitchless
         self.wav = wav
         self.sr = sr
         try:
@@ -44,11 +43,10 @@ class Stem:
                 Exception("Stem object needs to be passed either path to a directory or raw audio array")
             self.wav, self.sr = sf.read(str(path))
         try:
-            ls = [string.capitalize() for string in pitchless]
-        except TypeError:
-            pass # pitchless is assumed to be a bool if not iterable
-        else:
-            self.pitchless = self.string in ls # pitchless is true iff the stem type is included in the pitchless list
+            ls = [s.capitalize() for s in pitchless]
+            self.pitchless = self.string in ls
+        except:
+            self.pitchless = self.string == "Drums"
 
         if not self.pitchless and self.mode not in MODES:
             warnings.warn(f'\"{self.mode}\" is neither Major nor Minor. Stem \"{self.string}\" of \"{self.song_name}\" '+
@@ -209,26 +207,25 @@ def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, song_lengt
 
     original_stems = stems.copy()
     stems = merge_same_bpm_and_key(stems)
-    transposed = []
+
     for stem in stems:
         stem.wav = stem.wav[:int(song_length*len(stem.wav))]
-        transposed.append(transpose_stem(stem, key))
+    with ThreadPool() as pool:
+        transposed = pool.starmap(transpose_stem, [(stem, key) for stem in stems])
     transposed = merge_same_bpm_and_key(transposed)
 
-    transposed_stretched = []
-    for stem in transposed:
-        transposed_stretched.append(stretch_stem(stem, bpm))
+    with ThreadPool() as pool:
+        transposed_stretched = pool.starmap(stretch_stem, [(stem, bpm) for stem in transposed])
 
     mashup_wav = sum_wav_list([stem.wav for stem in transposed_stretched])
     return Mashup(mashup_wav, original_stems)
 
-def instr_acapella_mashup(instr:str, acap:str, bpm=None, key:int=None, song_length:float=1):
+def vocalswap_mashup(instr:str, acap:str, bpm=None, key:int=None, song_length:float=1):
     """`song_length`: Desired mashup length as a fraction of 32 bars"""
-    drums = load_stem(os.path.join(SONGDIR, instr, "drums.wav"))
-    other = load_stem(os.path.join(SONGDIR, instr, "other.wav"))
-    bass = load_stem(os.path.join(SONGDIR, instr, "bass.wav"))
-    vocals = load_stem(os.path.join(SONGDIR, acap, "vocals.wav"))
-
+    drums = load_stem(os.path.join(instr, "drums.wav"))
+    other = load_stem(os.path.join(instr, "other.wav"))
+    bass = load_stem(os.path.join(instr, "bass.wav"))
+    vocals = load_stem(os.path.join(acap, "vocals.wav"))
     return mashup_stems([drums, other, bass, vocals], bpm, key, song_length)
     
 def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
@@ -240,6 +237,12 @@ def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, k
                 stem = load_random_stem(stem_type)
         stems.append(stem)
     return mashup_stems(stems, bpm, key, song_length)
+
+def random_vocalswap_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
+    # TODO: this assumes all song folders have all stem types
+    song_paths = SONG_PATHS.copy()
+    np.random.shuffle(song_paths)
+    return vocalswap_mashup(song_paths[0], song_paths[1], bpm, key, song_length)
 
 def make_mashup_name(stems):
     names = [stem.song_name for stem in stems]
@@ -294,14 +297,20 @@ def load_stem(file):
     return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file)
     
 
-def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
+def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, vocalswap=True, song_length=1, allow_duplicates=False):
+    """Play random mashups indefinitely\n
+    `vocalswap`: When set to true all instrumental sources will come from the same song"""
+
+    make_mashup = random_mashup
+    if vocalswap: make_mashup = random_vocalswap_mashup
+
     print("Generating first mashup, please wait...\nPressing enter will skip the current mashup\n")
-    mashup = random_mashup(stem_types, bpm, key, song_length, allow_duplicates)
+    mashup = make_mashup(stem_types, bpm, key, song_length, allow_duplicates)
     while True:
         playObject = play_wav_array(mashup.wav, mashup.sr)
         print(f"Now playing: {mashup.description()}")
         pool = ThreadPool(processes=1)
-        result = pool.apply_async(random_mashup, (stem_types, bpm, key, song_length, allow_duplicates))
+        result = pool.apply_async(make_mashup, (stem_types, bpm, key, song_length, allow_duplicates))
         wait_or_skip(playObject)
         mashup = result.get()
 
