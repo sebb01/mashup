@@ -11,8 +11,8 @@ from collections import defaultdict
 from collections.abc import Iterable
 import warnings
 
+# TODO: fix playback pausing while loading next mashup
 # TODO: maybe make the song name attribute in info.json not forced unique by using a hash of the wave as ID instead? not sure
-#sdfvfdvbdfg
 
 NS_IN_ONE_SECOND = 1000000000
 SONGDIR = "songs"
@@ -206,9 +206,10 @@ def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, song_lengt
 
     original_stems = stems.copy()
     stems = merge_same_bpm_and_key(stems)
+    nr_samples = int(min([len(stem.wav) for stem in stems]) * song_length)
     transposed = []
     for stem in stems:
-        stem.wav = stem.wav[:int(song_length*len(stem.wav))]
+        stem.wav = stem.wav[:nr_samples]
         transposed.append(transpose_stem(stem, key))
     transposed = merge_same_bpm_and_key(transposed)
 
@@ -308,11 +309,11 @@ def play_mashup(mashup, print_info = True):
     playObject.wait_done()
 
 def main():
-    import simpleaudio.functionchecks as fc
+    #import simpleaudio.functionchecks as fc
 
-    fc.LeftRightCheck.run()
-    print("DONE")
-    # infinite_random_mashup(song_length=1/4, bpm=110)
+    #fc.LeftRightCheck.run()
+    #print("DONE")
+    infinite_random_mashup(song_length=1/8, bpm=105)
 
     # '''
     # acap = "interior crocodile"
