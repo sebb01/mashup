@@ -10,6 +10,8 @@ import pathlib
 from collections import defaultdict
 from collections.abc import Iterable
 import warnings
+from inputimeout import inputimeout, TimeoutOccurred
+from contextlib import redirect_stdout
 
 # TODO: fix playback pausing while loading next mashup
 # TODO: maybe make the song name attribute in info.json not forced unique by using a hash of the wave as ID instead? not sure
@@ -206,10 +208,9 @@ def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, song_lengt
 
     original_stems = stems.copy()
     stems = merge_same_bpm_and_key(stems)
-    nr_samples = int(min([len(stem.wav) for stem in stems]) * song_length)
     transposed = []
     for stem in stems:
-        stem.wav = stem.wav[:nr_samples]
+        stem.wav = stem.wav[:int(song_length*len(stem.wav))]
         transposed.append(transpose_stem(stem, key))
     transposed = merge_same_bpm_and_key(transposed)
 
@@ -229,7 +230,7 @@ def instr_acapella_mashup(instr:str, acap:str, bpm=None, key:int=None, song_leng
 
     return mashup_stems([drums, other, bass, vocals], bpm, key, song_length)
     
-def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=0.5, allow_duplicates=False):
+def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
     stems = []
     for stem_type in stem_types:
         stem = load_random_stem(stem_type)
@@ -292,15 +293,13 @@ def load_stem(file):
     return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file)
     
 
-def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=0.5, allow_duplicates=False):
+def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
     mashup = random_mashup(stem_types, bpm, key, song_length, allow_duplicates)
     while True:
         playObject = play_wav_array(mashup.wav, mashup.sr)
         print(f"Now playing: {mashup.description()}")
         mashup = random_mashup(stem_types, bpm, key, song_length, allow_duplicates)
-        # TODO eliminate the delay between stems
-        # TODO skip button
-        playObject.wait_done()
+        wait_or_skip(playObject)
 
 def play_mashup(mashup, print_info = True):
     if print_info:
@@ -308,12 +307,25 @@ def play_mashup(mashup, print_info = True):
     playObject = play_wav_array(mashup.wav, mashup.sr)
     playObject.wait_done()
 
+def wait_or_skip(playObject: sa.PlayObject):
+    """Wait for a playObject to finish playing, skip the wait if there is any user input"""
+    user_input = None
+    while playObject.is_playing() and user_input is None:
+        try:
+            # Redirect stdout because inputimeout() has print() calls that I don't want
+            with open(os.devnull, 'w') as f:
+                with redirect_stdout(f):
+                    user_input = inputimeout(timeout=0.1)
+        except TimeoutOccurred:
+            pass
+    playObject.stop()
+
 def main():
     #import simpleaudio.functionchecks as fc
 
     #fc.LeftRightCheck.run()
     #print("DONE")
-    infinite_random_mashup(song_length=1/8, bpm=105)
+    infinite_random_mashup()
 
     # '''
     # acap = "interior crocodile"

@@ -2,3 +2,4 @@ soundfile
 pyrubberband
 simpleaudio
 numpy
+inputimeout
