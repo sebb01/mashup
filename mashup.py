@@ -12,6 +12,7 @@ from collections.abc import Iterable
 import warnings
 from inputimeout import inputimeout, TimeoutOccurred
 from contextlib import redirect_stdout
+from multiprocessing.pool import ThreadPool
 
 # TODO: fix playback pausing while loading next mashup
 # TODO: maybe make the song name attribute in info.json not forced unique by using a hash of the wave as ID instead? not sure
@@ -294,12 +295,15 @@ def load_stem(file):
     
 
 def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
+    print("Generating first mashup, please wait...\nPressing enter will skip the current mashup\n")
     mashup = random_mashup(stem_types, bpm, key, song_length, allow_duplicates)
     while True:
         playObject = play_wav_array(mashup.wav, mashup.sr)
         print(f"Now playing: {mashup.description()}")
-        mashup = random_mashup(stem_types, bpm, key, song_length, allow_duplicates)
+        pool = ThreadPool(processes=1)
+        result = pool.apply_async(random_mashup, (stem_types, bpm, key, song_length, allow_duplicates))
         wait_or_skip(playObject)
+        mashup = result.get()
 
 def play_mashup(mashup, print_info = True):
     if print_info:
@@ -318,6 +322,8 @@ def wait_or_skip(playObject: sa.PlayObject):
                     user_input = inputimeout(timeout=0.1)
         except TimeoutOccurred:
             pass
+    if user_input is not None:
+        print("Mashup Skipped...\n")
     playObject.stop()
 
 def main():
