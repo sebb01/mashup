@@ -11,16 +11,16 @@ from collections import defaultdict
 from collections.abc import Iterable
 import warnings
 
-# TODO: Replace all occurences of "track" with "stem". that's a lot less confusing
 # TODO: maybe make the song name attribute in info.json not forced unique by using a hash of the wave as ID instead? not sure
 
+NS_IN_ONE_SECOND = 1000000000
 SONGDIR = "songs"
-TRACK_PATHS = [file for file in pathlib.Path(SONGDIR).rglob("*") if os.path.isfile(file)]
+STEM_PATHS = [file for file in pathlib.Path(SONGDIR).rglob("*") if os.path.isfile(file)]
 SONG_PATHS = [os.path.join(SONGDIR, p) for p in os.listdir(SONGDIR) if not os.path.isfile(p)]
 KEYS = {'A':0, 'Bb':1, 'B':2, 'C':3, 'Db':4, 'D':5, 'Eb':6, 'E':7, 'F':8, 'Gb':9, 'G':10, 'Ab': 11}
 MODES = ('Minor', 'Major')
     
-class Track:
+class Stem:
     """Class that holds the audio data and attributes of one stem of a song"""
     def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None):
         self.song_name = song_name
@@ -33,22 +33,22 @@ class Track:
         try:
             self.string
         except AttributeError:
-            self.string = "Track"
+            self.string = "Stem"
             
         if wav is None:
             if path == None:
-                Exception("Track object needs to be passed either path to a directory or raw audio array")
+                Exception("Stem object needs to be passed either path to a directory or raw audio array")
             self.wav, self.sr = sf.read(str(path))
         try:
             ls = [string.capitalize() for string in pitchless]
         except TypeError:
             pass # pitchless is assumed to be a bool if not iterable
         else:
-            self.pitchless = self.string in ls # pitchless is true iff the trackType is included in the pitchless list
+            self.pitchless = self.string in ls # pitchless is true iff the stem type is included in the pitchless list
 
         if not self.pitchless and self.mode not in MODES:
-            warnings.warn(f'\"{self.mode}\" is neither Major nor Minor. Track \"{self.string}\" of \"{self.song_name}\" '+
-                f'will only be mashed up with other tracks that use the \"{self.mode}\" mode.')
+            warnings.warn(f'\"{self.mode}\" is neither Major nor Minor. Stem \"{self.string}\" of \"{self.song_name}\" '+
+                f'will only be mashed up with other Stems that use the \"{self.mode}\" mode.')
         
 
     def __repr__(self):
@@ -63,36 +63,36 @@ class Track:
     def __ne__(self, o):
         return not self.__eq__(o)
 
-class Drums(Track):
+class Drums(Stem):
     def __init__(self, song_name, bpm, key=None, mode=None, pitchless=True, wav=None, sr=44100, path=None):
         self.string = "Drums"
         super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
         
-class Bass(Track):
+class Bass(Stem):
     def __init__(self, song_name, bpm, key, mode, pitchless=False, wav=None, sr=44100, path=None):
         self.string = "Bass"
         super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
         
-class Other(Track):
+class Other(Stem):
     def __init__(self, song_name, bpm, key, mode, pitchless=False, wav=None, sr=44100, path=None):
         self.string = "Other"
         super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)  
         
-class Vocals(Track):
+class Vocals(Stem):
     def __init__(self, song_name, bpm, key, mode, pitchless=False, wav=None, sr=44100, path=None):
         self.string = "Vocals"
         super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
         
 class Mashup:
-    # TODO: Make this a subclass of Track
+    # TODO: Make this a subclass of Stem
     """Class that holds the audio data and attributes of a mashup."""
-    def __init__(self, wav, tracks, sr=44100):
+    def __init__(self, wav, stems, sr=44100):
         self.wav = wav
-        self.tracks = tracks
-        self.name = make_mashup_name(tracks)
+        self.stems = stems
+        self.name = make_mashup_name(stems)
         self.sr = sr
-        for track in self.tracks:
-            track.wav = None    # Purge track wavs to hopefully free memory
+        for stem in self.stems:
+            stem.wav = None    # Purge stem wavs to hopefully free memory
         
     def __repr__(self):
         return self.name
@@ -102,8 +102,8 @@ class Mashup:
 
     def description(self):
         s = f"{self.name}\n"
-        for track in self.tracks:
-            s = s + f"{track.string}: {track.song_name}\n"
+        for stem in self.stems:
+            s = s + f"{stem.string}: {stem.song_name}\n"
         return s
         
     
@@ -116,34 +116,34 @@ def sum_wav_list(wavs: Iterable[ndarray]) -> ndarray:
         accu = sum_wavs(accu, wav)
     return accu
     
-def stretch_track(track: type[Track], new_bpm) -> type[Track]:
-    """Stretch a track to a new BPM"""
-    old_bpm = track.bpm
+def stretch_stem(stem: type[Stem], new_bpm) -> type[Stem]:
+    """Stretch a stem to a new BPM"""
+    old_bpm = stem.bpm
     ratio = new_bpm/old_bpm
-    wav_stretch = pyrb.time_stretch(track.wav, track.sr, ratio)
-    trackType = get_track_type(track)
-    return trackType(track.song_name, new_bpm, track.key, track.mode, wav=wav_stretch, sr=track.sr)
+    wav_stretch = pyrb.time_stretch(stem.wav, stem.sr, ratio)
+    stemType = get_stem_type(stem)
+    return stemType(stem.song_name, new_bpm, stem.key, stem.mode, wav=wav_stretch, sr=stem.sr)
 
-def get_track_type(track: type[Track]) -> type:
-    """Get the type of stem of a track"""
+def get_stem_type(stem: type[Stem]) -> type:
+    """Get the type of stem of a stem"""
     try:
-        return globals()[track.string]
+        return globals()[stem.string]
     except:
-        return Track
+        return Stem
 
-def find_middle_bpm(tracks: Iterable[type[Track]]) -> float:
-    """Find the mean BPM in a list of tracks"""
+def find_middle_bpm(stems: Iterable[type[Stem]]) -> float:
+    """Find the mean BPM in a list of stems"""
     # TODO: maybe median is better
-    tempi = [track.bpm for track in tracks]
+    tempi = [stem.bpm for stem in stems]
     return np.mean(tempi)
 
-def find_middle_key(tracks: Iterable[type[Track]]) -> int:
-    """Find the key that has minimal distance to all tracks in a list"""
+def find_middle_key(stems: Iterable[type[Stem]]) -> int:
+    """Find the key that has minimal distance to all stems in a list"""
     # TODO: mean makes no sense since it wraps around after 11, i should use something else
     keys = []
-    for track in tracks:
-        if not track.pitchless:
-            keys.append(track.key)
+    for stem in stems:
+        if not stem.pitchless:
+            keys.append(stem.key)
     if len(keys) <= 0:
         return 0
     return int(np.mean(keys))
@@ -160,15 +160,15 @@ def sum_wavs(wav1: ndarray, wav2: ndarray) -> ndarray:
         shorter = np.pad(shorter, ((0, diff), (0, 0)))
     return shorter + longer
     
-def transpose_track(track: type[Track], new_key: int) -> type[Track]:
-    """Transpose a track to a new key, unless the track is marked as pitchless"""
-    if track.pitchless:
-        return track
-    semitones = new_key - track.key % 12
-    #print(f"Transposing {track} by {semitones} semitones to {new_key}...")
-    new_wav = pyrb.pitch_shift(track.wav, track.sr, semitones)
-    trackType = get_track_type(track)
-    return trackType(track.song_name, track.bpm, new_key, track.mode, wav=new_wav, sr=track.sr)
+def transpose_stem(stem: type[Stem], new_key: int) -> type[Stem]:
+    """Transpose a stem to a new key, unless the stem is marked as pitchless"""
+    if stem.pitchless:
+        return stem
+    semitones = new_key - stem.key % 12
+    #print(f"Transposing {stem} by {semitones} semitones to {new_key}...")
+    new_wav = pyrb.pitch_shift(stem.wav, stem.sr, semitones)
+    stemType = get_stem_type(stem)
+    return stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr)
 
 def play_wav_array(array: ndarray, sr: int):
     # normalize to 16bit
@@ -179,108 +179,88 @@ def play_wav_array(array: ndarray, sr: int):
     # returns sa.PlayObject
     return waveObject.play()      
 
-def merge_same_bpm_and_key(tracks: Iterable[type[Track]]) -> list[Track]:
-    new_tracks = []
+def merge_same_bpm_and_key(stems: Iterable[type[Stem]]) -> list[Stem]:
+    new_stems = []
     groups = defaultdict(list)
-    for track in tracks:
-        key = track.key
-        if track.pitchless:
+    for stem in stems:
+        key = stem.key
+        if stem.pitchless:
             key = 'pitchless'
-        groups[(track.bpm, key)].append(track)
+        groups[(stem.bpm, key)].append(stem)
     for group in groups.values():
         if len(group) <= 1:
-            new_tracks.append(group[0])
+            new_stems.append(group[0])
             continue
-        new_wav = sum_wav_list([track.wav for track in group])
-        new_tracks.append(Track("N/A (Merged Track)", group[0].bpm, group[0].key, group[0].mode, wav=new_wav))
-    return new_tracks
+        new_wav = sum_wav_list([stem.wav for stem in group])
+        new_stems.append(Stem("N/A (Merged stem)", group[0].bpm, group[0].key, group[0].mode, wav=new_wav))
+    return new_stems
 
 
-def mashup_tracks(tracks: Iterable[type[Track]], bpm=None, key:int=None, song_length:float=0.5) -> Mashup:
+def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, song_length:float=0.5) -> Mashup:
     """`song_length`: Desired mashup length as a fraction of 32 bars"""
     if bpm is None:
-        bpm = find_middle_bpm(tracks)
+        bpm = find_middle_bpm(stems)
     if key is None:
-        key = find_middle_key(tracks)
+        key = find_middle_key(stems)
 
-    original_tracks = tracks.copy()
-    tracks = merge_same_bpm_and_key(tracks)
+    original_stems = stems.copy()
+    stems = merge_same_bpm_and_key(stems)
     transposed = []
-    for track in tracks:
-        track.wav = track.wav[:int(song_length*len(track.wav))]
-        transposed.append(transpose_track(track, key))
+    for stem in stems:
+        stem.wav = stem.wav[:int(song_length*len(stem.wav))]
+        transposed.append(transpose_stem(stem, key))
     transposed = merge_same_bpm_and_key(transposed)
 
     transposed_stretched = []
-    for track in transposed:
-        transposed_stretched.append(stretch_track(track, bpm))
+    for stem in transposed:
+        transposed_stretched.append(stretch_stem(stem, bpm))
 
-    mashup_wav = sum_wav_list([track.wav for track in transposed_stretched])
-    return Mashup(mashup_wav, original_tracks)
+    mashup_wav = sum_wav_list([stem.wav for stem in transposed_stretched])
+    return Mashup(mashup_wav, original_stems)
 
 def instr_acapella_mashup(instr:str, acap:str, bpm=None, key:int=None, song_length:float=1):
     """`song_length`: Desired mashup length as a fraction of 32 bars"""
-    drums = load_track(os.path.join(SONGDIR, instr, "drums.wav"))
-    other = load_track(os.path.join(SONGDIR, instr, "other.wav"))
-    bass = load_track(os.path.join(SONGDIR, instr, "bass.wav"))
-    vocals = load_track(os.path.join(SONGDIR, acap, "vocals.wav"))
+    drums = load_stem(os.path.join(SONGDIR, instr, "drums.wav"))
+    other = load_stem(os.path.join(SONGDIR, instr, "other.wav"))
+    bass = load_stem(os.path.join(SONGDIR, instr, "bass.wav"))
+    vocals = load_stem(os.path.join(SONGDIR, acap, "vocals.wav"))
 
-    return mashup_tracks([drums, other, bass, vocals], bpm, key, song_length)
-
-'''
-# Make a random mashup
-# track_types: track types ("instruments") to include
-# nr_diff_tracks: number of unique songs to draw stems from
-# returns Mashup object
-def semi_random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], nr_diff_tracks=2, bpm=None, key=None):
-    if nr_diff_tracks >= len(track_types):
-        return random_mashup(track_types, bpm, key)
+    return mashup_stems([drums, other, bass, vocals], bpm, key, song_length)
     
-    np.random.shuffle(track_types)
-    
-    song_paths = SONG_PATHS.copy()
-    np.random.shuffle(song_paths)
-    for song_path in song_paths:
-        if nr_diff_tracks <= 0:
-            break
-        track_path = 
-'''
-    
-    
-def random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=0.5, allow_duplicates=False):
-    tracks = []
-    for track_type in track_types:
-        track = load_random_track(track_type)
+def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=0.5, allow_duplicates=False):
+    stems = []
+    for stem_type in stem_types:
+        stem = load_random_stem(stem_type)
         if not allow_duplicates:
-            while (track in tracks):
-                track = load_random_track(track_type)
-        tracks.append(track)
-    return mashup_tracks(tracks, bpm, key, song_length)
+            while (stem in stems):
+                stem = load_random_stem(stem_type)
+        stems.append(stem)
+    return mashup_stems(stems, bpm, key, song_length)
 
-def make_mashup_name(tracks):
-    names = [track.song_name for track in tracks]
+def make_mashup_name(stems):
+    names = [stem.song_name for stem in stems]
     names = list(dict.fromkeys(names)) # Remove duplicates, from https://www.w3schools.com/python/python_howto_remove_duplicates.asp
     s = ""
     for name in names:
             s += f"{name} x "
     return s[:-3]
 
-def track_length(wav, sr):
+def stem_length(wav, sr):
     samples_per_ns = sr / NS_IN_ONE_SECOND
     return len(wav) / samples_per_ns
 
-def get_track_string(file_path):
+def get_stem_string(file_path):
     return os.path.split(file_path)[1][:-4].capitalize()
     
-def load_random_track(track_type = None):
-    paths = TRACK_PATHS.copy()
+def load_random_stem(stem_type = None):
+    paths = STEM_PATHS.copy()
     np.random.shuffle(paths)
-    if track_type is None:
-        return load_track(paths[0])
+    if stem_type is None:
+        return load_stem(paths[0])
     for path in paths:
-        if get_track_string(path) == track_type:
-            return load_track(path)
-    raise Exception(f'No tracks of type \"{track_type}\" were found')
+        if get_stem_string(path) == stem_type:
+            return load_stem(path)
+    raise Exception(f'No stems of type \"{stem_type}\" were found')
 
 def get_optional_values(song_dict):
     try:
@@ -300,23 +280,23 @@ def get_optional_values(song_dict):
 
     return key, mode, pitchless
 
-def load_track(file):
+def load_stem(file):
     directory = os.path.split(file)[0]
     with open(os.path.join(directory, "info.json")) as info_file:
         s = json.load(info_file)
-    trackstring = get_track_string(file)
-    trackType = globals()[trackstring]
+    stemstring = get_stem_string(file)
+    stemType = globals()[stemstring]
     key, mode, pitchless = get_optional_values(s)
-    return trackType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file)
+    return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file)
     
 
-def infinite_random_mashup(track_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=0.5, allow_duplicates=False):
-    mashup = random_mashup(track_types, bpm, key, song_length, allow_duplicates)
+def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=0.5, allow_duplicates=False):
+    mashup = random_mashup(stem_types, bpm, key, song_length, allow_duplicates)
     while True:
         playObject = play_wav_array(mashup.wav, mashup.sr)
         print(f"Now playing: {mashup.description()}")
-        mashup = random_mashup(track_types, bpm, key, song_length, allow_duplicates)
-        # TODO eliminate the delay between tracks
+        mashup = random_mashup(stem_types, bpm, key, song_length, allow_duplicates)
+        # TODO eliminate the delay between stems
         # TODO skip button
         playObject.wait_done()
 
@@ -327,21 +307,25 @@ def play_mashup(mashup, print_info = True):
     playObject.wait_done()
 
 def main():
-    infinite_random_mashup(song_length=1/4, bpm=110)
+    import simpleaudio.functionchecks as fc
 
-    '''
-    acap = "interior crocodile"
-    instr = "psychosocial verse"
-    mashup = instr_acapella_mashup(instr, acap)
-    play_mashup(mashup)
-    '''
+    fc.LeftRightCheck.run()
+    print("DONE")
+    # infinite_random_mashup(song_length=1/4, bpm=110)
 
-    drums = load_track(os.path.join(SONGDIR, "the less", "drums.wav"))
-    other = load_track(os.path.join(SONGDIR, "beat it", "other.wav"))
-    bass = load_track(os.path.join(SONGDIR, "psychosocial chorus", "bass.wav"))
-    vocals = load_track(os.path.join(SONGDIR, "psychosocial chorus", "vocals.wav"))
-    mashup = mashup_tracks([drums, other, bass, vocals])
-    play_mashup(mashup)
+    # '''
+    # acap = "interior crocodile"
+    # instr = "psychosocial verse"
+    # mashup = instr_acapella_mashup(instr, acap)
+    # play_mashup(mashup)
+    # '''
+
+    # drums = load_stem(os.path.join(SONGDIR, "the less", "drums.wav"))
+    # other = load_stem(os.path.join(SONGDIR, "beat it", "other.wav"))
+    # bass = load_stem(os.path.join(SONGDIR, "psychosocial chorus", "bass.wav"))
+    # vocals = load_stem(os.path.join(SONGDIR, "psychosocial chorus", "vocals.wav"))
+    # mashup = mashup_stems([drums, other, bass, vocals])
+    # play_mashup(mashup)
 
 if __name__ == "__main__":
     main()

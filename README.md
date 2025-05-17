@@ -1,3 +1,6 @@
+## Python Version
+Because of an [issue in SimpleAudio](https://github.com/hamiltron/py-simple-audio/issues/74), only Python versions below 3.12 are supported. This library is tested with Python 3.10.6.
+
 ## How to import your own stems
 - Make a folder inside of the `\songs` folder
 - Drop stem(s) as .wav file(s) into this folder. Each stem should be named either:
