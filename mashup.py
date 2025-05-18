@@ -164,6 +164,7 @@ def sum_wavs(wav1: ndarray, wav2: ndarray) -> ndarray:
     
 def transpose_stem(stem: type[Stem], new_key: int) -> type[Stem]:
     """Transpose a stem to a new key, unless the stem is marked as pitchless"""
+    #TODO: handle major and minor
     if stem.pitchless:
         return stem
     semitones = new_key - stem.key % 12
@@ -198,7 +199,7 @@ def merge_same_bpm_and_key(stems: Iterable[type[Stem]]) -> list[Stem]:
     return new_stems
 
 
-def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, song_length:float=0.5) -> Mashup:
+def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, song_length:float=1) -> Mashup:
     """`song_length`: Desired mashup length as a fraction of 32 bars"""
     if bpm is None:
         bpm = find_middle_bpm(stems)
@@ -239,10 +240,16 @@ def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, k
     return mashup_stems(stems, bpm, key, song_length)
 
 def random_vocalswap_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
-    # TODO: this assumes all song folders have all stem types
     song_paths = SONG_PATHS.copy()
-    np.random.shuffle(song_paths)
-    return vocalswap_mashup(song_paths[0], song_paths[1], bpm, key, song_length)
+    # Some songs may not have a certain stem, as a bandaid fix this loop just tries again
+    # TODO: improve this
+    mashup = None
+    while mashup is None:
+        try:
+            np.random.shuffle(song_paths)
+            mashup = vocalswap_mashup(song_paths[0], song_paths[1], bpm, key, song_length)
+        except: pass
+    return mashup
 
 def make_mashup_name(stems):
     names = [stem.song_name for stem in stems]
@@ -306,6 +313,7 @@ def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bp
 
     print("Generating first mashup, please wait...\nPressing enter will skip the current mashup\n")
     mashup = make_mashup(stem_types, bpm, key, song_length, allow_duplicates)
+    # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
     while True:
         playObject = play_wav_array(mashup.wav, mashup.sr)
         print(f"Now playing: {mashup.description()}")
@@ -349,10 +357,10 @@ def main():
     # play_mashup(mashup)
     # '''
 
-    # drums = load_stem(os.path.join(SONGDIR, "the less", "drums.wav"))
-    # other = load_stem(os.path.join(SONGDIR, "beat it", "other.wav"))
-    # bass = load_stem(os.path.join(SONGDIR, "psychosocial chorus", "bass.wav"))
-    # vocals = load_stem(os.path.join(SONGDIR, "psychosocial chorus", "vocals.wav"))
+    # drums = load_stem(os.path.join(SONGDIR, "monitoring", "drums.wav"))
+    # other = load_stem(os.path.join(SONGDIR, "monitoring", "other.wav"))
+    # bass = load_stem(os.path.join(SONGDIR, "monitoring", "bass.wav"))
+    # vocals = load_stem(os.path.join(SONGDIR, "tear gas", "vocals.wav"))
     # mashup = mashup_stems([drums, other, bass, vocals])
     # play_mashup(mashup)
 
