@@ -1,6 +1,5 @@
 import soundfile as sf
 import pyrubberband as pyrb
-from enum import Enum
 import numpy as np
 from numpy import ndarray
 import os
@@ -16,10 +15,11 @@ from multiprocessing.pool import ThreadPool
 
 # TODO: fix playback pausing while loading next mashup
 # TODO: maybe make the song name attribute in info.json not forced unique by using a hash of the wave as ID instead? not sure
+# TODO: Mode where the user can type which stems should stay, rest gets a new random stem
 
 NS_IN_ONE_SECOND = 1000000000
 SONGDIR = "songs"
-STEM_PATHS = [file for file in pathlib.Path(SONGDIR).rglob("*") if os.path.isfile(file)]
+STEM_PATHS = [file for file in pathlib.Path(SONGDIR).rglob("*.[wW][aA][vV]")]
 SONG_PATHS = [os.path.join(SONGDIR, p) for p in os.listdir(SONGDIR) if not os.path.isfile(p)]
 KEYS = {'A':0, 'Bb':1, 'B':2, 'C':3, 'Db':4, 'D':5, 'Eb':6, 'E':7, 'F':8, 'Gb':9, 'G':10, 'Ab': 11}
 MODES = ('Minor', 'Major')
@@ -54,7 +54,7 @@ class Stem:
         
 
     def __repr__(self):
-        return f"{self.string} of {self.song_name}"
+        return f"{self.string}:\t\t{self.song_name}"
     
     def __str__(self):
         return self.__repr__()
@@ -84,6 +84,9 @@ class Vocals(Stem):
     def __init__(self, song_name, bpm, key, mode, pitchless=False, wav=None, sr=44100, path=None):
         self.string = "Vocals"
         super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
+    
+    def __repr__(self):
+        return f"Vocals/Lead:\t{self.song_name}"
         
 class Mashup:
     # TODO: Make this a subclass of Stem
@@ -103,9 +106,9 @@ class Mashup:
         return self.__repr__()
 
     def description(self):
-        s = f"{self.name}\n"
+        s = f"{self.name}\n=====================================================\n"
         for stem in self.stems:
-            s = s + f"{stem.string}: {stem.song_name}\n"
+            s = s + str(stem) + "\n"
         return s
         
     
@@ -316,15 +319,14 @@ def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bp
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
     while True:
         playObject = play_wav_array(mashup.wav, mashup.sr)
-        print(f"Now playing: {mashup.description()}")
+        print_now_playing(mashup)
         pool = ThreadPool(processes=1)
         result = pool.apply_async(make_mashup, (stem_types, bpm, key, song_length, allow_duplicates))
         wait_or_skip(playObject)
         mashup = result.get()
 
 def play_mashup(mashup, print_info = True):
-    if print_info:
-        print(f"Now playing: {mashup.description()}")
+    if print_info: print_now_playing(mashup)
     playObject = play_wav_array(mashup.wav, mashup.sr)
     playObject.wait_done()
 
@@ -343,12 +345,26 @@ def wait_or_skip(playObject: sa.PlayObject):
         print("Mashup Skipped...\n")
     playObject.stop()
 
+def find_song(name: str) -> str:
+    # TODO support search through song name metadata
+    matches = list(pathlib.Path(SONGDIR).rglob(f"*{name}*"))
+    if matches:
+        return str(matches[0])
+    else:
+        raise FileNotFoundError(f"No song found matching '{name}'")
+
+def find_stem(song_name: str, stem_name: str):
+    return os.path.join(find_song(song_name), stem_name + ".wav")
+
+def print_now_playing(mashup: Mashup):
+    print(f"Now playing:\t{mashup.description()}")
+
 def main():
     #import simpleaudio.functionchecks as fc
 
     #fc.LeftRightCheck.run()
     #print("DONE")
-    infinite_random_mashup()
+    #infinite_random_mashup(vocalswap=False)
 
     # '''
     # acap = "interior crocodile"
@@ -357,12 +373,14 @@ def main():
     # play_mashup(mashup)
     # '''
 
-    # drums = load_stem(os.path.join(SONGDIR, "monitoring", "drums.wav"))
-    # other = load_stem(os.path.join(SONGDIR, "monitoring", "other.wav"))
-    # bass = load_stem(os.path.join(SONGDIR, "monitoring", "bass.wav"))
-    # vocals = load_stem(os.path.join(SONGDIR, "tear gas", "vocals.wav"))
-    # mashup = mashup_stems([drums, other, bass, vocals])
+    # drums = load_stem(find_stem("vampire", "drums"))
+    # other = load_stem(find_stem("vampire", "other"))
+    # bass = load_stem(find_stem("vampi", "bass"))
+    # vocals = load_stem(find_stem("vamp", "vocals"))
+    # mashup = mashup_stems([drums, other, bass, vocals], bpm=179, key=KEYS["Bb"])
     # play_mashup(mashup)
+
+    play_mashup(vocalswap_mashup(find_song("the le"), find_song("i wou")))
 
 if __name__ == "__main__":
     main()
