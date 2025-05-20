@@ -52,6 +52,11 @@ class Stem:
             warnings.warn(f'\"{self.mode}\" is neither Major nor Minor. Stem \"{self.string}\" of \"{self.song_name}\" '+
                 f'will only be mashed up with other Stems that use the \"{self.mode}\" mode.')
         
+        # Treat major keys as their relative minor counterparts
+        if self.mode == "Major":
+            self.mode = "Minor"
+            self.key -= 3
+        
 
     def __repr__(self):
         return f"{self.string}:\t\t{self.song_name}"
@@ -125,7 +130,23 @@ def stretch_stem(stem: type[Stem], new_bpm) -> type[Stem]:
     """Stretch a stem to a new BPM"""
     old_bpm = stem.bpm
     ratio = new_bpm/old_bpm
+
+    # Check if treating the stem as half- or doubletime would result in less stretching
+    halftime = False
+    if abs(1 - ratio*2) < abs(1 - ratio):
+        ratio = ratio*2
+        halftime = True
+
+    doubletime = False
+    if abs(1 - ratio/2) < abs(1 - ratio):
+        ratio = ratio/2
+        doubletime = True
+
     wav_stretch = pyrb.time_stretch(stem.wav, stem.sr, ratio)
+    if halftime:
+        wav_stretch = np.concatenate((wav_stretch, wav_stretch))
+    if doubletime:
+        wav_stretch = wav_stretch[:len(wav_stretch)//2]
     stemType = get_stem_type(stem)
     return stemType(stem.song_name, new_bpm, stem.key, stem.mode, wav=wav_stretch, sr=stem.sr)
 
@@ -364,23 +385,19 @@ def main():
 
     #fc.LeftRightCheck.run()
     #print("DONE")
-    #infinite_random_mashup(vocalswap=False)
 
-    # '''
-    # acap = "interior crocodile"
-    # instr = "psychosocial verse"
-    # mashup = instr_acapella_mashup(instr, acap)
-    # play_mashup(mashup)
-    # '''
+    #infinite_random_mashup()
 
-    # drums = load_stem(find_stem("vampire", "drums"))
-    # other = load_stem(find_stem("vampire", "other"))
-    # bass = load_stem(find_stem("vampi", "bass"))
-    # vocals = load_stem(find_stem("vamp", "vocals"))
-    # mashup = mashup_stems([drums, other, bass, vocals], bpm=179, key=KEYS["Bb"])
+    #play_mashup(vocalswap_mashup(find_song("vampire"), find_song("tear gas"), bpm=179))
+
+    # drums = load_stem(find_stem("the less", "drums"))
+    # other = load_stem(find_stem("would", "other"))
+    # bass = load_stem(find_stem("bites", "bass"))
+    # vocals = load_stem(find_stem("would", "vocals"))
+    # mashup = mashup_stems([drums, other, bass, vocals])
     # play_mashup(mashup)
 
-    play_mashup(vocalswap_mashup(find_song("the le"), find_song("i wou")))
+    play_mashup(vocalswap_mashup(find_song("sword"), find_song("money ma")))
 
 if __name__ == "__main__":
     main()
