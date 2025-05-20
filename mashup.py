@@ -27,7 +27,7 @@ MODES = ('Minor', 'Major')
     
 class Stem:
     """Class that holds the audio data and attributes of one stem of a song"""
-    def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None, halftime=False, doubletime=False):
+    def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None, halftime=False, doubletime=False, balance=1):
         self.song_name = song_name
         self.bpm = bpm
         self.key = key
@@ -45,6 +45,7 @@ class Stem:
             if path == None:
                 Exception("Stem object needs to be passed either path to a directory or raw audio array")
             self.wav, self.sr = sf.read(str(path))
+            self.wav = balance * self.wav
         try:
             ls = [s.capitalize() for s in pitchless]
             self.pitchless = self.string in ls
@@ -179,7 +180,7 @@ def find_middle_bpm(stems: Iterable[type[Stem]]) -> float:
     
     # If the majority of stems are marked as doubletime, it makes more sense to mark the rest as halftime instead
     if bin(best_mask).count("1") > len(stems) / 2:
-        best_tempo_list = best_tempo_list / 2
+        best_tempo_list = np.array(best_tempo_list) / 2
         for i, stem in enumerate(stems):
             if not (best_mask>>i) & 1:
                 stem.halftime = True
@@ -354,14 +355,14 @@ def get_optional_values(song_dict):
 
     return key, mode, pitchless
 
-def load_stem(file):
+def load_stem(file, balance=1):
     directory = os.path.split(file)[0]
     with open(os.path.join(directory, "info.json")) as info_file:
         s = json.load(info_file)
     stemstring = get_stem_string(file)
     stemType = globals()[stemstring]
     key, mode, pitchless = get_optional_values(s)
-    return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file)
+    return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
     
 
 def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, vocalswap=True, song_length=1, allow_duplicates=False):
