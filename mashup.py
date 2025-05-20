@@ -13,9 +13,10 @@ from inputimeout import inputimeout, TimeoutOccurred
 from contextlib import redirect_stdout
 from multiprocessing.pool import ThreadPool
 
-# TODO: fix playback pausing while loading next mashup
-# TODO: maybe make the song name attribute in info.json not forced unique by using a hash of the wave as ID instead? not sure
+# TODO: fix the transition between mashups having a pause
+# TODO: maybe make the song name attribute in info.json not forced unique by using some has as an ID
 # TODO: Mode where the user can type which stems should stay, rest gets a new random stem
+# TODO: move some functions into the Stem class
 
 NS_IN_ONE_SECOND = 1000000000
 SONGDIR = "songs"
@@ -26,13 +27,15 @@ MODES = ('Minor', 'Major')
     
 class Stem:
     """Class that holds the audio data and attributes of one stem of a song"""
-    def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None):
+    def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None, halftime=False, doubletime=False):
         self.song_name = song_name
         self.bpm = bpm
         self.key = key
         self.mode = mode.capitalize()
         self.wav = wav
         self.sr = sr
+        self.halftime = halftime
+        self.doubletime = doubletime
         try:
             self.string
         except AttributeError:
@@ -71,24 +74,24 @@ class Stem:
         return not self.__eq__(o)
 
 class Drums(Stem):
-    def __init__(self, song_name, bpm, key=None, mode=None, pitchless=True, wav=None, sr=44100, path=None):
+    def __init__(self, *args, **kwargs):
         self.string = "Drums"
-        super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
-        
+        super().__init__(*args, **kwargs)
+
 class Bass(Stem):
-    def __init__(self, song_name, bpm, key, mode, pitchless=False, wav=None, sr=44100, path=None):
+    def __init__(self, *args, **kwargs):
         self.string = "Bass"
-        super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
-        
+        super().__init__(*args, **kwargs)
+
 class Other(Stem):
-    def __init__(self, song_name, bpm, key, mode, pitchless=False, wav=None, sr=44100, path=None):
+    def __init__(self, *args, **kwargs):
         self.string = "Other"
-        super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)  
-        
+        super().__init__(*args, **kwargs)
+
 class Vocals(Stem):
-    def __init__(self, song_name, bpm, key, mode, pitchless=False, wav=None, sr=44100, path=None):
+    def __init__(self, *args, **kwargs):
         self.string = "Vocals"
-        super().__init__(song_name, bpm, key, mode, pitchless=pitchless, wav=wav, sr=sr, path=path)
+        super().__init__(*args, **kwargs)
     
     def __repr__(self):
         return f"Vocals/Lead:\t{self.song_name}"
@@ -127,28 +130,22 @@ def sum_wav_list(wavs: Iterable[ndarray]) -> ndarray:
     return accu
     
 def stretch_stem(stem: type[Stem], new_bpm) -> type[Stem]:
-    """Stretch a stem to a new BPM"""
+    """Stretch a stem to a new BPM.\n
+    If the stem is marked as doubletime or halftime it will also be cut in half or repeated twice respectively."""
+    wav = stem.wav
     old_bpm = stem.bpm
     ratio = new_bpm/old_bpm
 
-    # Check if treating the stem as half- or doubletime would result in less stretching
-    halftime = False
-    if abs(1 - ratio*2) < abs(1 - ratio):
-        ratio = ratio*2
-        halftime = True
-
-    doubletime = False
-    if abs(1 - ratio/2) < abs(1 - ratio):
-        ratio = ratio/2
-        doubletime = True
-
-    wav_stretch = pyrb.time_stretch(stem.wav, stem.sr, ratio)
-    if halftime:
+    if stem.doubletime:
+        wav = wav[:len(wav)//2]
+    wav_stretch = pyrb.time_stretch(wav, stem.sr, ratio)
+    if stem.halftime:
         wav_stretch = np.concatenate((wav_stretch, wav_stretch))
-    if doubletime:
-        wav_stretch = wav_stretch[:len(wav_stretch)//2]
+    
     stemType = get_stem_type(stem)
-    return stemType(stem.song_name, new_bpm, stem.key, stem.mode, wav=wav_stretch, sr=stem.sr)
+    return stemType(
+        stem.song_name, new_bpm, stem.key, stem.mode, wav=wav_stretch, sr=stem.sr,
+        halftime=stem.halftime, doubletime=stem.doubletime)
 
 def get_stem_type(stem: type[Stem]) -> type:
     """Get the type of stem of a stem"""
@@ -159,20 +156,54 @@ def get_stem_type(stem: type[Stem]) -> type:
 
 def find_middle_bpm(stems: Iterable[type[Stem]]) -> float:
     """Find the mean BPM in a list of stems"""
-    # TODO: maybe median is better
     tempi = [stem.bpm for stem in stems]
-    return np.mean(tempi)
+    if len(np.unique(tempi)) <= 1: return tempi[0]
+    best_tempo_list = []
+    best_mask = 0
+    min_std = float('inf')
+
+    # Make all possible bitstrings of length len(tempi)
+    # 0 means we consider the original BPM, 1 means doubletime
+    for mask in range(2**len(tempi)):
+        tempi_mixed = []
+        for i in range(len(tempi)):
+            if (mask>>i) & 1:
+                tempi_mixed.append(tempi[i]*2)
+            else:
+                tempi_mixed.append(tempi[i])
+        std = np.std(tempi_mixed)
+        if std < min_std:
+            min_std = std
+            best_tempo_list = tempi_mixed
+            best_mask = mask
+    
+    # If the majority of stems are marked as doubletime, it makes more sense to mark the rest as halftime instead
+    if bin(best_mask).count("1") > len(stems) / 2:
+        best_tempo_list = best_tempo_list / 2
+        for i, stem in enumerate(stems):
+            if not (best_mask>>i) & 1:
+                stem.halftime = True
+                stem.bpm = stem.bpm / 2
+    else:
+        for i, stem in enumerate(stems):
+            if (best_mask>>i) & 1:
+                stem.doubletime = True
+                stem.bpm = stem.bpm * 2
+    return np.mean(best_tempo_list) # TODO maybe median is better?
 
 def find_middle_key(stems: Iterable[type[Stem]]) -> int:
-    """Find the key that has minimal distance to all stems in a list"""
-    # TODO: mean makes no sense since it wraps around after 11, i should use something else
-    keys = []
-    for stem in stems:
-        if not stem.pitchless:
-            keys.append(stem.key)
+    """Find the key that minimizes the maximum distance to any of the stems"""
+    keys = [stem.key % 12 for stem in stems if not stem.pitchless]
     if len(keys) <= 0:
         return 0
-    return int(np.mean(keys))
+    min_max_dist = 9999
+    best_key = 0
+    for candidate in range(12):
+        max_dist = max(  min( abs(candidate - k), 12 - abs(candidate - k) ) for k in keys  )
+        if max_dist < min_max_dist:
+            min_max_dist = max_dist
+            best_key = candidate
+    return best_key
 
 def sum_wavs(wav1: ndarray, wav2: ndarray) -> ndarray:
     """Sum two audio arrays"""
@@ -188,14 +219,16 @@ def sum_wavs(wav1: ndarray, wav2: ndarray) -> ndarray:
     
 def transpose_stem(stem: type[Stem], new_key: int) -> type[Stem]:
     """Transpose a stem to a new key, unless the stem is marked as pitchless"""
-    #TODO: handle major and minor
     if stem.pitchless:
         return stem
     semitones = new_key - stem.key % 12
     #print(f"Transposing {stem} by {semitones} semitones to {new_key}...")
     new_wav = pyrb.pitch_shift(stem.wav, stem.sr, semitones)
     stemType = get_stem_type(stem)
-    return stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr)
+    dummy = stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr,
+            halftime=stem.halftime, doubletime=stem.doubletime)
+    return stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr,
+            halftime=stem.halftime, doubletime=stem.doubletime)
 
 def play_wav_array(array: ndarray, sr: int):
     # normalize to 16bit
@@ -219,7 +252,10 @@ def merge_same_bpm_and_key(stems: Iterable[type[Stem]]) -> list[Stem]:
             new_stems.append(group[0])
             continue
         new_wav = sum_wav_list([stem.wav for stem in group])
-        new_stems.append(Stem("N/A (Merged stem)", group[0].bpm, group[0].key, group[0].mode, wav=new_wav))
+        halftime = any(stem.halftime for stem in group)
+        doubletime = any(stem.doubletime for stem in group)
+        new_stems.append(Stem(make_mashup_name(group), group[0].bpm, group[0].key, group[0].mode, 
+                              wav=new_wav, halftime=halftime, doubletime=doubletime))
     return new_stems
 
 
