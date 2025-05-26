@@ -12,11 +12,13 @@ import warnings
 from inputimeout import inputimeout, TimeoutOccurred
 from contextlib import redirect_stdout
 from multiprocessing.pool import ThreadPool
+import re
 
 # TODO: fix the transition between mashups having a pause
 # TODO: maybe make the song name attribute in info.json not forced unique by using some has as an ID
 # TODO: Mode where the user can type which stems should stay, rest gets a new random stem
 # TODO: move some functions into the Stem class
+# TODO: key finding algo has a bug, check mashup between constellation and gohouteki or antonymph x the less i know
 
 NS_IN_ONE_SECOND = 1000000000
 SONGDIR = "songs"
@@ -282,15 +284,24 @@ def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, song_lengt
     mashup_wav = sum_wav_list([stem.wav for stem in transposed_stretched])
     return Mashup(mashup_wav, original_stems)
 
-def vocalswap_mashup(instr:str, acap:str, bpm=None, key:int=None, song_length:float=1):
+def vocalswap_mashup(instr:str, acap:str, balances=[1]*4, **kwargs):
     """`song_length`: Desired mashup length as a fraction of 32 bars"""
-    drums = load_stem(os.path.join(instr, "drums.wav"))
-    other = load_stem(os.path.join(instr, "other.wav"))
-    bass = load_stem(os.path.join(instr, "bass.wav"))
-    vocals = load_stem(os.path.join(acap, "vocals.wav"))
-    return mashup_stems([drums, other, bass, vocals], bpm, key, song_length)
+    stem_paths = [
+        os.path.join(instr, "drums.wav"),
+        os.path.join(instr, "other.wav"),
+        os.path.join(instr, "bass.wav"),
+        os.path.join(acap, "vocals.wav"),
+    ]
+    stems = []
+    for path, balance in zip(stem_paths, balances):
+        try:
+            stems.append(load_stem(path, balance))
+        except:
+            print(f"{path} does not exist, so it won't be loaded.")
+            pass            
+    return mashup_stems(stems, **kwargs)
     
-def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
+def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], allow_duplicates=False, **kwargs):
     stems = []
     for stem_type in stem_types:
         stem = load_random_stem(stem_type)
@@ -298,19 +309,28 @@ def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, k
             while (stem in stems):
                 stem = load_random_stem(stem_type)
         stems.append(stem)
-    return mashup_stems(stems, bpm, key, song_length)
+    return mashup_stems(stems, **kwargs)
 
-def random_vocalswap_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, song_length=1, allow_duplicates=False):
-    song_paths = SONG_PATHS.copy()
-    # Some songs may not have a certain stem, as a bandaid fix this loop just tries again
-    # TODO: improve this
-    mashup = None
-    while mashup is None:
-        try:
-            np.random.shuffle(song_paths)
-            mashup = vocalswap_mashup(song_paths[0], song_paths[1], bpm, key, song_length)
-        except: pass
-    return mashup
+def get_random_instrumental_path() -> str:
+    pattern = re.compile(r"(?i)(?<!vocals)\.wav$")
+    for i in range(500):
+        song_path = np.random.choice(SONG_PATHS)
+        stem_files = [file for file in pathlib.Path(song_path).rglob("*") if pattern.search(str(file))]
+        if stem_files: return song_path
+    raise Exception(f"Could not find an instrumental stem after looking through {i+1} song folders")
+
+def get_random_vocal_path() -> str:
+    for i in range(500):
+        song_path = np.random.choice(SONG_PATHS)
+        vocals_path = os.path.join(song_path, "vocals.wav")
+        if os.path.exists(vocals_path): return song_path
+    raise Exception(f"Could not find a vocal stem after looking through {i+1} song folders")
+
+def random_vocalswap_mashup(_=None, **kwargs):
+    # dummy argument is a workaround so that this function can be used interchangeably with random_mashup
+    instr = get_random_instrumental_path()
+    acap = get_random_vocal_path()
+    return vocalswap_mashup(instr, acap, **kwargs)
 
 def make_mashup_name(stems):
     names = [stem.song_name for stem in stems]
@@ -357,7 +377,7 @@ def get_optional_values(song_dict):
 
 def load_stem(file, balance=1):
     directory = os.path.split(file)[0]
-    with open(os.path.join(directory, "info.json")) as info_file:
+    with open(os.path.join(directory, "info.json"), encoding='utf-8') as info_file:
         s = json.load(info_file)
     stemstring = get_stem_string(file)
     stemType = globals()[stemstring]
@@ -365,7 +385,7 @@ def load_stem(file, balance=1):
     return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
     
 
-def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bpm=None, key=None, vocalswap=True, song_length=1, allow_duplicates=False):
+def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], vocalswap=True, **kwargs):
     """Play random mashups indefinitely\n
     `vocalswap`: When set to true all instrumental sources will come from the same song"""
 
@@ -373,15 +393,16 @@ def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], bp
     if vocalswap: make_mashup = random_vocalswap_mashup
 
     print("Generating first mashup, please wait...\nPressing enter will skip the current mashup\n")
-    mashup = make_mashup(stem_types, bpm, key, song_length, allow_duplicates)
+    with ThreadPool() as pool:
+        mashup = pool.apply(make_mashup, args=(stem_types,), kwds=kwargs)
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
     while True:
         playObject = play_wav_array(mashup.wav, mashup.sr)
         print_now_playing(mashup)
-        pool = ThreadPool(processes=1)
-        result = pool.apply_async(make_mashup, (stem_types, bpm, key, song_length, allow_duplicates))
-        wait_or_skip(playObject)
-        mashup = result.get()
+        with ThreadPool() as pool:
+            result = pool.apply_async(make_mashup, args=(stem_types,), kwds=kwargs)
+            wait_or_skip(playObject)
+            mashup = result.get()
 
 def play_mashup(mashup, print_info = True):
     if print_info: print_now_playing(mashup)
@@ -417,24 +438,31 @@ def find_stem(song_name: str, stem_name: str):
 def print_now_playing(mashup: Mashup):
     print(f"Now playing:\t{mashup.description()}")
 
+def quick_mashup(drums, other, bass, vocals, **kwargs):
+    print(loading_message())
+    drums = load_stem(find_stem(drums, "drums"))
+    other = load_stem(find_stem(other, "other"))
+    bass = load_stem(find_stem(bass, "bass"))
+    vocals = load_stem(find_stem(vocals, "vocals"))
+    play_mashup(mashup_stems([drums, other, bass, vocals], **kwargs))
+
+def quick_vocalswap_mashup(instr, acap, **kwargs):
+    print(loading_message())
+    play_mashup(vocalswap_mashup(find_song(instr), find_song(acap), **kwargs))
+
+def loading_message():
+    return "Preparing Mashup..."
+
 def main():
-    #import simpleaudio.functionchecks as fc
+    #quick_vocalswap_mashup('money', 'const')
+    
+    infinite_random_mashup()
 
-    #fc.LeftRightCheck.run()
-    #print("DONE")
-
-    #infinite_random_mashup()
-
-    #play_mashup(vocalswap_mashup(find_song("vampire"), find_song("tear gas"), bpm=179))
-
-    # drums = load_stem(find_stem("the less", "drums"))
-    # other = load_stem(find_stem("would", "other"))
-    # bass = load_stem(find_stem("bites", "bass"))
-    # vocals = load_stem(find_stem("would", "vocals"))
-    # mashup = mashup_stems([drums, other, bass, vocals])
-    # play_mashup(mashup)
-
-    play_mashup(vocalswap_mashup(find_song("sword"), find_song("money ma")))
+    # play_mashup(mashup_stems([load_stem(find_stem('money', 'drums')),
+    #                           load_stem(find_stem('ocean', 'drums')),
+    #                           load_stem(find_stem('little', 'bass')),
+    #                           load_stem(find_stem('sword', 'other')),
+    #                           load_stem(find_stem('little', 'other'))]))
 
 if __name__ == "__main__":
     main()
