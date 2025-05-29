@@ -224,8 +224,9 @@ def transpose_stem(stem: type[Stem], new_key: int) -> type[Stem]:
     """Transpose a stem to a new key, unless the stem is marked as pitchless"""
     if stem.pitchless:
         return stem
-    semitones = new_key - stem.key % 12
-    #print(f"Transposing {stem} by {semitones} semitones to {new_key}...")
+    semitones = max(stem.key, new_key) - min(stem.key, new_key)
+    if semitones >= 7:
+        semitones -= 12     # Pitch down if the lower octave is closer 
     new_wav = pyrb.pitch_shift(stem.wav, stem.sr, semitones)
     stemType = get_stem_type(stem)
     dummy = stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr,
@@ -262,18 +263,23 @@ def merge_same_bpm_and_key(stems: Iterable[type[Stem]]) -> list[Stem]:
     return new_stems
 
 
-def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, song_length:float=1) -> Mashup:
-    """`song_length`: Desired mashup length as a fraction of 32 bars"""
+def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, start=0, end=1) -> Mashup:
+    """`song_length`:\tMashup length as a fraction of 32 bars\n
+    `start, end`:\tStarting and end point of the mashups as a fraction of 32 bars"""
     if bpm is None:
         bpm = find_middle_bpm(stems)
     if key is None:
         key = find_middle_key(stems)
+    if start >= 1 or end <= 0:
+        raise ValueError("Start point must be within [0, 1); end point must be within (0, 1])")
+    if start >= end:
+        raise ValueError("Starting point must be before the end point")
 
     original_stems = stems.copy()
     stems = merge_same_bpm_and_key(stems)
 
     for stem in stems:
-        stem.wav = stem.wav[:int(song_length*len(stem.wav))]
+        stem.wav = stem.wav[int(start*len(stem.wav)) : int(end*len(stem.wav))]
     with ThreadPool() as pool:
         transposed = pool.starmap(transpose_stem, [(stem, key) for stem in stems])
     transposed = merge_same_bpm_and_key(transposed)
