@@ -224,13 +224,13 @@ def transpose_stem(stem: type[Stem], new_key: int) -> type[Stem]:
     """Transpose a stem to a new key, unless the stem is marked as pitchless"""
     if stem.pitchless:
         return stem
-    semitones = max(stem.key, new_key) - min(stem.key, new_key)
+    semitones = new_key - stem.key
     if semitones >= 7:
-        semitones -= 12     # Pitch down if the lower octave is closer 
+        semitones -= 12     # Pitch down if lower octave is closer 
+    if semitones <= -6:
+        semitones += 12     # Pitch up if upper octave is closer
     new_wav = pyrb.pitch_shift(stem.wav, stem.sr, semitones)
     stemType = get_stem_type(stem)
-    dummy = stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr,
-            halftime=stem.halftime, doubletime=stem.doubletime)
     return stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr,
             halftime=stem.halftime, doubletime=stem.doubletime)
 
