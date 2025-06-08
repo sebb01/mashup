@@ -391,24 +391,30 @@ def load_stem(file, balance=1):
     return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
     
 
-def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], vocalswap=True, **kwargs):
+def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], vocalswap=True, n_segments:int=1, **kwargs):
     """Play random mashups indefinitely\n
-    `vocalswap`: When set to true all instrumental sources will come from the same song"""
+    `vocalswap`: Whether all instrumental sources should come from the same song\n
+    `n_segments`: Number of segments that one mashup should have.
+    This means each song will be trimmed to `1/n_segments` of its length."""
 
-    make_mashup = random_mashup
-    if vocalswap: make_mashup = random_vocalswap_mashup
+    mashup_function = random_mashup
+    if vocalswap: mashup_function = random_vocalswap_mashup
 
     print("Generating first mashup, please wait...\nPressing enter will skip the current mashup\n")
-    with ThreadPool() as pool:
-        mashup = pool.apply(make_mashup, args=(stem_types,), kwds=kwargs)
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
-    while True:
-        playObject = play_wav_array(mashup.wav, mashup.sr)
-        print_now_playing(mashup)
+    playObject = None
+    for i in range(999_999_999):
+        start = (i % n_segments) / n_segments
+        end = ((i+1) % n_segments) / n_segments
+        if end == 0: end = 1
+        kwargs['start'] = start; kwargs['end'] = end
         with ThreadPool() as pool:
-            result = pool.apply_async(make_mashup, args=(stem_types,), kwds=kwargs)
+            result = pool.apply_async(mashup_function, args=(stem_types,), kwds=kwargs)
             wait_or_skip(playObject)
             mashup = result.get()
+        playObject = play_wav_array(mashup.wav, mashup.sr)
+        print_now_playing(mashup)
+        
 
 def play_mashup(mashup, print_info = True):
     if print_info: print_now_playing(mashup)
@@ -417,6 +423,7 @@ def play_mashup(mashup, print_info = True):
 
 def wait_or_skip(playObject: sa.PlayObject):
     """Wait for a playObject to finish playing, skip the wait if there is any user input"""
+    if playObject is None: return
     user_input = None
     while playObject.is_playing() and user_input is None:
         try:
@@ -460,15 +467,11 @@ def loading_message():
     return "Preparing Mashup..."
 
 def main():
-    #quick_vocalswap_mashup('money', 'const')
-    
-    infinite_random_mashup()
+    #quick_mashup('money', 'dust', 'dust', 'tear')
 
-    # play_mashup(mashup_stems([load_stem(find_stem('money', 'drums')),
-    #                           load_stem(find_stem('ocean', 'drums')),
-    #                           load_stem(find_stem('little', 'bass')),
-    #                           load_stem(find_stem('sword', 'other')),
-    #                           load_stem(find_stem('little', 'other'))]))
+    #quick_vocalswap_mashup('conste', 'psycho', start=1/2)
+    
+    infinite_random_mashup(vocalswap=True, n_segments=4, bpm=120, key=KEYS["Eb"])
 
 if __name__ == "__main__":
     main()
