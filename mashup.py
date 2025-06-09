@@ -15,6 +15,7 @@ from multiprocessing.pool import ThreadPool
 import re
 import time
 import msvcrt
+from copy import deepcopy
 
 # TODO: fix the transition between mashups having a pause
 # TODO: maybe make the song name attribute in info.json not forced unique by using some has as an ID
@@ -78,6 +79,9 @@ class Stem:
 
     def __ne__(self, o):
         return not self.__eq__(o)
+    
+    def copy(self):
+        return deepcopy(self)
 
 class Drums(Stem):
     def __init__(self, *args, **kwargs):
@@ -111,7 +115,6 @@ class Mashup:
         self.name = make_mashup_name(stems)
         self.bpm = bpm
         self.sr = sr
-        #self.duration_s = len(stems[0].wav) / stems[0].sr
         for stem in self.stems:
             stem.wav = None    # Purge stem wavs to hopefully free memory
         
@@ -312,9 +315,13 @@ def vocalswap_mashup(instr:str, acap:str, balances=[1]*4, **kwargs):
             pass            
     return mashup_stems(stems, **kwargs)
     
-def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], allow_duplicates=False, **kwargs):
-    stems = []
+def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], given_stems=None, allow_duplicates=False, **kwargs):
+    """`given_stems`: Pre-defined stems. Their types will be excluded from the random selection."""
+    if given_stems is None: given_stems = []
+    stems = [stem.copy() for stem in given_stems]
+    given_types = [stem.string.lower() for stem in stems]
     for stem_type in stem_types:
+        if stem_type.lower() in given_types: continue
         stem = load_random_stem(stem_type)
         if not allow_duplicates:
             while (stem in stems):
@@ -364,7 +371,7 @@ def load_random_stem(stem_type = None):
     if stem_type is None:
         return load_stem(paths[0])
     for path in paths:
-        if get_stem_string(path) == stem_type:
+        if get_stem_string(path).lower() == stem_type.lower():
             return load_stem(path)
     raise Exception(f'No stems of type \"{stem_type}\" were found')
 
@@ -396,15 +403,12 @@ def load_stem(file, balance=1):
     return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
     
 
-def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], vocalswap=True, n_segments:int=1, **kwargs):
+def infinite_random_mashup(n_segments=1, **kwargs):
     """Play random mashups indefinitely\n
     `vocalswap`: Whether all instrumental sources should come from the same song\n
     `n_segments`: Number of segments that one mashup should have.
-    This means each song will be trimmed to `1/n_segments` of its length."""
-
-    mashup_function = random_mashup
-    if vocalswap: mashup_function = random_vocalswap_mashup
-
+    This means each song will be trimmed to `1/n_segments` of its length.
+    """
     print("Generating first mashup, please wait...\nPress 's' to skip a mashup segment\n")
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
     play_object, track_duration = None, None
@@ -414,7 +418,7 @@ def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], vo
         if end == 0: end = 1
         kwargs['start'] = start; kwargs['end'] = end
         with ThreadPool() as pool:
-            result = pool.apply_async(mashup_function, args=(stem_types,), kwds=kwargs)
+            result = pool.apply_async(random_mashup, kwds=kwargs)
             wait_or_skip(track_duration, play_object)
             mashup = result.get()
         play_object = play_wav_array(mashup.wav, mashup.sr)
@@ -474,11 +478,9 @@ def loading_message():
     return "Preparing Mashup..."
 
 def main():
-    #quick_mashup('money', 'dust', 'dust', 'tear')
-
-    #quick_vocalswap_mashup('conste', 'psycho', start=1/2)
-    
-    infinite_random_mashup(vocalswap=True, n_segments=4, bpm=130, key=KEYS["Eb"])
+    infinite_random_mashup(n_segments=4, bpm=120, key=KEYS["E"], 
+                          given_stems=[load_stem(find_stem("the less", "drums")),
+                                       load_stem(find_stem("crocodile", "vocals"))])
 
 if __name__ == "__main__":
     main()
