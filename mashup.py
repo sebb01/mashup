@@ -13,6 +13,8 @@ from inputimeout import inputimeout, TimeoutOccurred
 from contextlib import redirect_stdout
 from multiprocessing.pool import ThreadPool
 import re
+import time
+import msvcrt
 
 # TODO: fix the transition between mashups having a pause
 # TODO: maybe make the song name attribute in info.json not forced unique by using some has as an ID
@@ -26,6 +28,7 @@ STEM_PATHS = [file for file in pathlib.Path(SONGDIR).rglob("*.[wW][aA][vV]")]
 SONG_PATHS = [os.path.join(SONGDIR, p) for p in os.listdir(SONGDIR) if not os.path.isfile(p)]
 KEYS = {'A':0, 'Bb':1, 'B':2, 'C':3, 'Db':4, 'D':5, 'Eb':6, 'E':7, 'F':8, 'Gb':9, 'G':10, 'Ab': 11}
 MODES = ('Minor', 'Major')
+N_BEATS = 32*4 # Number of bars in each song. All songs provided in the songs folder should be trimmed to this number.
     
 class Stem:
     """Class that holds the audio data and attributes of one stem of a song"""
@@ -102,11 +105,13 @@ class Vocals(Stem):
 class Mashup:
     # TODO: Make this a subclass of Stem
     """Class that holds the audio data and attributes of a mashup."""
-    def __init__(self, wav, stems, sr=44100):
+    def __init__(self, wav, stems, bpm, sr=44100):
         self.wav = wav
         self.stems = stems
         self.name = make_mashup_name(stems)
+        self.bpm = bpm
         self.sr = sr
+        #self.duration_s = len(stems[0].wav) / stems[0].sr
         for stem in self.stems:
             stem.wav = None    # Purge stem wavs to hopefully free memory
         
@@ -240,7 +245,7 @@ def play_wav_array(array: ndarray, sr: int):
     # cast to 16bit
     array = array.astype(np.int16)
     waveObject = sa.WaveObject(array, 2, 2, sr)
-    # returns sa.PlayObject
+    # returns sa.play_object
     return waveObject.play()      
 
 def merge_same_bpm_and_key(stems: Iterable[type[Stem]]) -> list[Stem]:
@@ -288,7 +293,7 @@ def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, start=0, e
         transposed_stretched = pool.starmap(stretch_stem, [(stem, bpm) for stem in transposed])
 
     mashup_wav = sum_wav_list([stem.wav for stem in transposed_stretched])
-    return Mashup(mashup_wav, original_stems)
+    return Mashup(mashup_wav, original_stems, bpm)
 
 def vocalswap_mashup(instr:str, acap:str, balances=[1]*4, **kwargs):
     """`song_length`: Desired mashup length as a fraction of 32 bars"""
@@ -400,9 +405,9 @@ def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], vo
     mashup_function = random_mashup
     if vocalswap: mashup_function = random_vocalswap_mashup
 
-    print("Generating first mashup, please wait...\nPressing enter will skip the current mashup\n")
+    print("Generating first mashup, please wait...\nPress 's' to skip a mashup segment\n")
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
-    playObject = None
+    play_object, track_duration = None, None
     for i in range(999_999_999):
         start = (i % n_segments) / n_segments
         end = ((i+1) % n_segments) / n_segments
@@ -410,32 +415,34 @@ def infinite_random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], vo
         kwargs['start'] = start; kwargs['end'] = end
         with ThreadPool() as pool:
             result = pool.apply_async(mashup_function, args=(stem_types,), kwds=kwargs)
-            wait_or_skip(playObject)
+            wait_or_skip(track_duration, play_object)
             mashup = result.get()
-        playObject = play_wav_array(mashup.wav, mashup.sr)
+        play_object = play_wav_array(mashup.wav, mashup.sr)
         print_now_playing(mashup)
+        track_duration = N_BEATS / n_segments / mashup.bpm * 60
         
 
 def play_mashup(mashup, print_info = True):
     if print_info: print_now_playing(mashup)
-    playObject = play_wav_array(mashup.wav, mashup.sr)
-    playObject.wait_done()
+    play_object = play_wav_array(mashup.wav, mashup.sr)
+    play_object.wait_done()
 
-def wait_or_skip(playObject: sa.PlayObject):
-    """Wait for a playObject to finish playing, skip the wait if there is any user input"""
-    if playObject is None: return
-    user_input = None
-    while playObject.is_playing() and user_input is None:
-        try:
-            # Redirect stdout because inputimeout() has print() calls that I don't want
-            with open(os.devnull, 'w') as f:
-                with redirect_stdout(f):
-                    user_input = inputimeout(timeout=0.1)
-        except TimeoutOccurred:
-            pass
-    if user_input is not None:
-        print("Mashup Skipped...\n")
-    playObject.stop()
+def wait_or_skip(track_duration, play_object):
+    """Wait for a track to finish playing, skip the wait if user presses `s`\n
+    Returns: `skipped`: Whether user skipped the track"""
+    if play_object is None: return False
+    track_duration -= 0.04 # Don't ask me why this has to be here but it does
+    start = time.perf_counter()
+    while True:
+        if msvcrt.kbhit():
+            if msvcrt.getwch() == 's':
+                print("Mashup segment skipped...")
+                play_object.stop()
+                return True
+        elapsed = (time.perf_counter() - start)
+        if elapsed >= track_duration:
+            return False
+        time.sleep(0.001)  # Sleep to reduce CPU usage
 
 def find_song(name: str) -> str:
     # TODO support search through song name metadata
@@ -471,7 +478,7 @@ def main():
 
     #quick_vocalswap_mashup('conste', 'psycho', start=1/2)
     
-    infinite_random_mashup(vocalswap=True, n_segments=4, bpm=120, key=KEYS["Eb"])
+    infinite_random_mashup(vocalswap=True, n_segments=4, bpm=130, key=KEYS["Eb"])
 
 if __name__ == "__main__":
     main()
