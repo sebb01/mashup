@@ -9,8 +9,6 @@ import pathlib
 from collections import defaultdict
 from collections.abc import Iterable
 import warnings
-from inputimeout import inputimeout, TimeoutOccurred
-from contextlib import redirect_stdout
 from multiprocessing.pool import ThreadPool
 import re
 import time
@@ -22,6 +20,7 @@ from copy import deepcopy
 # TODO: Mode where the user can type which stems should stay, rest gets a new random stem
 # TODO: move some functions into the Stem class
 # TODO: key finding algo has a bug, check mashup between constellation and gohouteki or antonymph x the less i know
+# TODO: migrate to different audio handling library, e.g. pydub
 
 NS_IN_ONE_SECOND = 1000000000
 SONGDIR = "songs"
@@ -462,12 +461,12 @@ def find_stem(song_name: str, stem_name: str):
 def print_now_playing(mashup: Mashup):
     print(f"Now playing:\t{mashup.description()}")
 
-def quick_mashup(drums, other, bass, vocals, **kwargs):
+def quick_mashup(drums, other, bass, vocals, balances=[1]*4, **kwargs):
     print(loading_message())
-    drums = load_stem(find_stem(drums, "drums"))
-    other = load_stem(find_stem(other, "other"))
-    bass = load_stem(find_stem(bass, "bass"))
-    vocals = load_stem(find_stem(vocals, "vocals"))
+    drums = load_stem(find_stem(drums, "drums"), balances[0])
+    other = load_stem(find_stem(other, "other"), balances[1])
+    bass = load_stem(find_stem(bass, "bass"), balances[2])
+    vocals = load_stem(find_stem(vocals, "vocals"), balances[3])
     play_mashup(mashup_stems([drums, other, bass, vocals], **kwargs))
 
 def quick_vocalswap_mashup(instr, acap, **kwargs):
