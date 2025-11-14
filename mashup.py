@@ -3,7 +3,6 @@ import pyrubberband as pyrb
 import numpy as np
 from numpy import ndarray
 import os
-import simpleaudio as sa
 import json
 import pathlib
 from collections import defaultdict
@@ -14,13 +13,14 @@ import re
 import time
 import msvcrt
 from copy import deepcopy
+from audioPlayer import AudioPlayer
 
-# TODO: fix the transition between mashups having a pause
+# TODO: song transition code is very cursed and does not account for lag
 # TODO: maybe make the song name attribute in info.json not forced unique by using some has as an ID
 # TODO: Mode where the user can type which stems should stay, rest gets a new random stem
 # TODO: move some functions into the Stem class
 # TODO: key finding algo has a bug, check mashup between constellation and gohouteki or antonymph x the less i know
-# TODO: migrate to different audio handling library, e.g. pydub
+# TODO: use better stretching library?
 
 NS_IN_ONE_SECOND = 1000000000
 SONGDIR = "songs"
@@ -49,7 +49,7 @@ class Stem:
         if wav is None:
             if path == None:
                 Exception("Stem object needs to be passed either path to a directory or raw audio array")
-            self.wav, self.sr = sf.read(str(path))
+            self.wav, self.sr = sf.read(file=str(path), always_2d=True, dtype="float32")
             self.wav = balance * self.wav
         try:
             ls = [s.capitalize() for s in pitchless]
@@ -241,15 +241,6 @@ def transpose_stem(stem: type[Stem], new_key: int) -> type[Stem]:
     return stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr,
             halftime=stem.halftime, doubletime=stem.doubletime)
 
-def play_wav_array(array: ndarray, sr: int):
-    # normalize to 16bit
-    array *= 32767 / np.max(np.abs(array))
-    # cast to 16bit
-    array = array.astype(np.int16)
-    waveObject = sa.WaveObject(array, 2, 2, sr)
-    # returns sa.play_object
-    return waveObject.play()      
-
 def merge_same_bpm_and_key(stems: Iterable[type[Stem]]) -> list[Stem]:
     new_stems = []
     groups = defaultdict(list)
@@ -410,7 +401,7 @@ def infinite_random_mashup(n_segments=1, **kwargs):
     """
     print("Generating first mashup, please wait...\nPress 's' to skip a mashup segment\n")
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
-    play_object, track_duration = None, None
+    player, track_duration = None, None
     for i in range(999_999_999):
         start = (i % n_segments) / n_segments
         end = ((i+1) % n_segments) / n_segments
@@ -418,17 +409,19 @@ def infinite_random_mashup(n_segments=1, **kwargs):
         kwargs['start'] = start; kwargs['end'] = end
         with ThreadPool() as pool:
             result = pool.apply_async(random_mashup, kwds=kwargs)
-            wait_or_skip(track_duration, play_object)
+            wait_or_skip(track_duration, player)
             mashup = result.get()
-        play_object = play_wav_array(mashup.wav, mashup.sr)
+        player = AudioPlayer(mashup.wav, mashup.sr)
+        player.start()
         print_now_playing(mashup)
         track_duration = N_BEATS / n_segments / mashup.bpm * 60
         
 
-def play_mashup(mashup, print_info = True):
+def play_mashup(mashup: Mashup, print_info = True):
     if print_info: print_now_playing(mashup)
-    play_object = play_wav_array(mashup.wav, mashup.sr)
-    play_object.wait_done()
+    player = AudioPlayer(mashup.wav, mashup.sr)
+    player.start()
+    player.join()
 
 def wait_or_skip(track_duration, play_object):
     """Wait for a track to finish playing, skip the wait if user presses `s`\n
