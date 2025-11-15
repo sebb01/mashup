@@ -455,13 +455,13 @@ def find_stem(song_name: str, stem_name: str):
 def print_now_playing(mashup: Mashup):
     print(f"Now playing:\t{mashup.description()}")
 
-def quick_mashup(drums, other, bass, vocals, balances=[1]*4, **kwargs):
+def quick_mashup(drums=None, bass=None, other=None, vocals=None, balances=[1]*4, **kwargs):
     print(loading_message())
-    drums = load_stem(find_stem(drums, "drums"), balances[0])
-    other = load_stem(find_stem(other, "other"), balances[1])
-    bass = load_stem(find_stem(bass, "bass"), balances[2])
-    vocals = load_stem(find_stem(vocals, "vocals"), balances[3])
-    play_mashup(mashup_stems([drums, other, bass, vocals], **kwargs))
+    stems = []
+    for stem_str, stem_type, balance in zip([drums, bass, other, vocals], ["drums", "bass", "other", "vocals"], balances):
+        if stem_str:
+            stems.append(load_stem(find_stem(stem_str, stem_type), balance))
+    play_mashup(mashup_stems(stems, **kwargs))
 
 def quick_vocalswap_mashup(instr, acap, **kwargs):
     print(loading_message())
