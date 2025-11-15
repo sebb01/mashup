@@ -164,9 +164,12 @@ def get_stem_type(stem: type[Stem]) -> type:
     except:
         return Stem
 
-def find_middle_bpm(stems: Iterable[type[Stem]]) -> float:
-    """Find the mean BPM in a list of stems"""
-    tempi = [stem.bpm for stem in stems]
+def find_middle_bpm(stems: Iterable[type[Stem]], ignore_types=None) -> float:
+    """Find the median BPM in a list of stems. Ignores `Bass` and `Other` stems by default. Pass `ignore_types` to change this."""
+    if ignore_types is None:
+        ignore_types = [Bass, Other]
+
+    tempi = [stem.bpm for stem in stems if not type(stem) in ignore_types]
     if len(np.unique(tempi)) <= 1: return tempi[0]
     best_tempo_list = []
     best_mask = 0
@@ -199,11 +202,14 @@ def find_middle_bpm(stems: Iterable[type[Stem]]) -> float:
             if (best_mask>>i) & 1:
                 stem.doubletime = True
                 stem.bpm = stem.bpm * 2
-    return np.mean(best_tempo_list) # TODO maybe median is better?
+    return np.median(best_tempo_list)
 
-def find_middle_key(stems: Iterable[type[Stem]]) -> int:
-    """Find the key that minimizes the maximum distance to any of the stems"""
-    keys = [stem.key % 12 for stem in stems if not stem.pitchless]
+def find_middle_key(stems: Iterable[type[Stem]], ignore_types=None) -> int:
+    """Find the key that minimizes the maximum distance to any of the stems. Ignores `Bass` stems by default. Pass `ignore_types` to change this."""
+    if ignore_types is None:
+        ignore_types = [Bass]
+        
+    keys = [stem.key % 12 for stem in stems if not stem.pitchless and not type(stem) in ignore_types]
     if len(keys) <= 0:
         return 0
     min_max_dist = 9999
