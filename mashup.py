@@ -393,12 +393,13 @@ def load_stem(file, balance=1):
     return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
     
 
-def infinite_random_mashup(n_segments=1, **kwargs):
+def infinite_random_mashup(n_segments=4, vocalswap=False, **kwargs):
     """Play random mashups indefinitely\n
     `vocalswap`: Whether all instrumental sources should come from the same song\n
     `n_segments`: Number of segments that one mashup should have.
     This means each song will be trimmed to `1/n_segments` of its length.
     """
+    mashup_func = random_vocalswap_mashup if vocalswap else random_mashup
     print("Generating first mashup, please wait...\nPress 's' to skip a mashup segment\n")
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
     player, track_duration = None, None
@@ -408,7 +409,7 @@ def infinite_random_mashup(n_segments=1, **kwargs):
         if end == 0: end = 1
         kwargs['start'] = start; kwargs['end'] = end
         with ThreadPool() as pool:
-            result = pool.apply_async(random_mashup, kwds=kwargs)
+            result = pool.apply_async(mashup_func, kwds=kwargs)
             wait_or_skip(track_duration, player)
             mashup = result.get()
         player = AudioPlayer(mashup.wav, mashup.sr)
