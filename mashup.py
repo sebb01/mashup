@@ -316,7 +316,7 @@ def random_mashup(types_to_generate:list[list[str]]=None, predefined_stems:list[
     `types_to_generate`: Nested list of stem types. Stem types in the same list will be picked from the same song. Default: `[["Drums", "Bass"], ["Other"], ["Vocals"]]`\n
     `predefined_stems`: Fixed stems. Exclude these from `types_to_generate` to avoid duplicates. Default: `None`\n
     """
-    if types_to_generate is None: types_to_generate = [["Drums", "Bass"], ["Other"], ["Vocals"]]
+    if types_to_generate is None: types_to_generate = [["Drums"], ["Bass", "Other"], ["Vocals"]]
     if predefined_stems is None: predefined_stems = []
 
     stems = [stem.copy() for stem in predefined_stems]
