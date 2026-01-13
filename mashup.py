@@ -25,14 +25,14 @@ from audioPlayer import AudioPlayer
 NS_IN_ONE_SECOND = 1000000000
 SONGDIR = "songs"
 STEM_PATHS = [file for file in pathlib.Path(SONGDIR).rglob("*.[wW][aA][vV]")]
-SONG_PATHS = [os.path.join(SONGDIR, p) for p in os.listdir(SONGDIR) if not os.path.isfile(p)]
+SONG_PATHS = [entry.path for entry in os.scandir(SONGDIR) if entry.is_dir()]
 KEYS = {'A':0, 'Bb':1, 'B':2, 'C':3, 'Db':4, 'D':5, 'Eb':6, 'E':7, 'F':8, 'Gb':9, 'G':10, 'Ab': 11}
 MODES = ('Minor', 'Major')
 N_BEATS = 32*4 # Number of bars in each song. All songs provided in the songs folder should be trimmed to this number.
     
 class Stem:
     """Class that holds the audio data and attributes of one stem of a song"""
-    def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None, halftime=False, doubletime=False, balance=1):
+    def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None, halftime=False, doubletime=False, balance=0.5):
         self.song_name = song_name
         self.bpm = bpm
         self.key = key
@@ -169,7 +169,7 @@ def find_middle_bpm(stems: Iterable[type[Stem]], ignore_types=None) -> float:
     if ignore_types is None:
         ignore_types = [Bass, Other]
 
-    tempi = [stem.bpm for stem in stems if not type(stem) in ignore_types]
+    tempi = [stem.bpm for stem in stems if type(stem) not in ignore_types]
     if len(np.unique(tempi)) <= 1: return tempi[0]
     best_tempo_list = []
     best_mask = 0
@@ -208,8 +208,8 @@ def find_middle_key(stems: Iterable[type[Stem]], ignore_types=None) -> int:
     """Find the key that minimizes the maximum distance to any of the stems. Ignores `Bass` stems by default. Pass `ignore_types` to change this."""
     if ignore_types is None:
         ignore_types = [Bass]
-        
-    keys = [stem.key % 12 for stem in stems if not stem.pitchless and not type(stem) in ignore_types]
+
+    keys = [stem.key % 12 for stem in stems if not stem.pitchless and type(stem) not in ignore_types]
     if len(keys) <= 0:
         return 0
     min_max_dist = 9999
@@ -311,18 +311,25 @@ def vocalswap_mashup(instr:str, acap:str, balances=[1]*4, **kwargs):
             pass            
     return mashup_stems(stems, **kwargs)
     
-def random_mashup(stem_types = ["Drums", "Bass", "Other", "Vocals"], given_stems=None, allow_duplicates=False, **kwargs):
-    """`given_stems`: Pre-defined stems. Their types will be excluded from the random selection."""
-    if given_stems is None: given_stems = []
-    stems = [stem.copy() for stem in given_stems]
-    given_types = [stem.string.lower() for stem in stems]
-    for stem_type in stem_types:
-        if stem_type.lower() in given_types: continue
-        stem = load_random_stem(stem_type)
-        if not allow_duplicates:
-            while (stem in stems):
-                stem = load_random_stem(stem_type)
-        stems.append(stem)
+def random_mashup(types_to_generate:list[list[str]]=None, predefined_stems:list[Stem]=None, **kwargs):
+    """
+    `types_to_generate`: Nested list of stem types. Stem types in the same list will be picked from the same song. Default: `[["Drums", "Bass"], ["Other"], ["Vocals"]]`\n
+    `predefined_stems`: Fixed stems. Exclude these from `types_to_generate` to avoid duplicates. Default: `None`\n
+    """
+    if types_to_generate is None: types_to_generate = [["Drums", "Bass"], ["Other"], ["Vocals"]]
+    if predefined_stems is None: predefined_stems = []
+
+    stems = [stem.copy() for stem in predefined_stems]
+    for stem_type_list in types_to_generate:
+        song_names = [stem.song_name for stem in stems]
+        song_path = np.random.choice(SONG_PATHS)
+        while get_song_name(song_path) in song_names:
+            song_path = np.random.choice(SONG_PATHS)
+        for stem_type in stem_type_list:
+            stem_path = os.path.join(song_path, f"{stem_type}.wav")
+            if not os.path.exists(stem_path):
+                continue
+            stems.append(load_stem(stem_path))
     return mashup_stems(stems, **kwargs)
 
 def get_random_instrumental_path() -> str:
@@ -333,17 +340,17 @@ def get_random_instrumental_path() -> str:
         if stem_files: return song_path
     raise Exception(f"Could not find an instrumental stem after looking through {i+1} song folders")
 
-def get_random_vocal_path() -> str:
+def get_random_stem_path(stem_type: str) -> str:
     for i in range(500):
         song_path = np.random.choice(SONG_PATHS)
-        vocals_path = os.path.join(song_path, "vocals.wav")
-        if os.path.exists(vocals_path): return song_path
-    raise Exception(f"Could not find a vocal stem after looking through {i+1} song folders")
+        stem_path = os.path.join(song_path, f"{stem_type}.wav")
+        if os.path.exists(stem_path): return song_path
+    raise Exception(f'Could not find a "{stem_type}" stem after looking through {i+1} song folders')
 
 def random_vocalswap_mashup(_=None, **kwargs):
     # dummy argument is a workaround so that this function can be used interchangeably with random_mashup
     instr = get_random_instrumental_path()
-    acap = get_random_vocal_path()
+    acap = get_random_stem_path("vocals")
     return vocalswap_mashup(instr, acap, **kwargs)
 
 def make_mashup_name(stems):
@@ -360,8 +367,13 @@ def stem_length(wav, sr):
 
 def get_stem_string(file_path):
     return os.path.split(file_path)[1][:-4].capitalize()
+
+def get_song_name(song_path):
+    with open(os.path.join(song_path, "info.json"), encoding='utf-8') as info_file:
+        infos = json.load(info_file)
+    return infos["name"]
     
-def load_random_stem(stem_type = None):
+def load_random_stem(stem_type: str = None):
     paths = STEM_PATHS.copy()
     np.random.shuffle(paths)
     if stem_type is None:
@@ -389,14 +401,14 @@ def get_optional_values(song_dict):
 
     return key, mode, pitchless
 
-def load_stem(file, balance=1):
+def load_stem(file, balance=0.5):
     directory = os.path.split(file)[0]
     with open(os.path.join(directory, "info.json"), encoding='utf-8') as info_file:
-        s = json.load(info_file)
-    stemstring = get_stem_string(file)
-    stemType = globals()[stemstring]
-    key, mode, pitchless = get_optional_values(s)
-    return stemType(s["name"], s["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
+        infos = json.load(info_file)
+    stem_string = get_stem_string(file)
+    stem_constructor = globals()[stem_string]
+    key, mode, pitchless = get_optional_values(infos)
+    return stem_constructor(infos["name"], infos["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
     
 
 def infinite_random_mashup(n_segments=4, vocalswap=False, **kwargs):
@@ -477,9 +489,16 @@ def loading_message():
     return "Preparing Mashup..."
 
 def main():
-    infinite_random_mashup(n_segments=4, bpm=120, key=KEYS["E"], 
-                          given_stems=[load_stem(find_stem("the less", "drums")),
-                                       load_stem(find_stem("crocodile", "vocals"))])
+    # quick_vocalswap_mashup("photo", "sebb rem")
+    seed = np.random.randint(low=0, high=999999)
+    np.random.seed(seed)
+    print(f"Using seed {seed}")
+    # infinite_random_mashup(vocalswap=True, n_segments=1)
+    infinite_random_mashup(n_segments=4, 
+                           predefined_stems=[load_stem(find_stem("croc", "vocals"), 0.8), load_stem(find_stem("the less", "drums"))], 
+                           types_to_generate=[["Bass", "Other"]],
+                           bpm=116,
+                           key=KEYS["D"])
 
 if __name__ == "__main__":
     main()
