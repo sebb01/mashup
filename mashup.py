@@ -32,12 +32,11 @@ N_BEATS = 32*4 # Number of bars in each song. All songs provided in the songs fo
     
 class Stem:
     """Class that holds the audio data and attributes of one stem of a song"""
-    def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav=None, sr=44100, path=None, halftime=False, doubletime=False, balance=0.5):
+    def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav: np.ndarray|None=None, sr=44100, path=None, halftime=False, doubletime=False, balance=0.5):
         self.song_name = song_name
         self.bpm = bpm
         self.key = key
         self.mode = mode.capitalize()
-        self.wav = wav
         self.sr = sr
         self.halftime = halftime
         self.doubletime = doubletime
@@ -49,8 +48,10 @@ class Stem:
         if wav is None:
             if path == None:
                 Exception("Stem object needs to be passed either path to a directory or raw audio array")
-            self.wav, self.sr = sf.read(file=str(path), always_2d=True, dtype="float32")
-            self.wav = balance * self.wav
+            wav, self.sr = sf.read(file=str(path), always_2d=True, dtype="float32")
+            wav = balance * wav
+        self.wav = wav
+
         try:
             ls = [s.capitalize() for s in pitchless]
             self.pitchless = self.string in ls
@@ -130,7 +131,7 @@ class Mashup:
         return s
         
     
-def sum_wav_list(wavs: Iterable[ndarray]) -> ndarray:
+def sum_wav_list(wavs: list[ndarray]) -> ndarray:
     """Sum a list of audio arrays into one audio array"""
     accu = wavs[0]
     if len(wavs) <= 1:
@@ -139,7 +140,7 @@ def sum_wav_list(wavs: Iterable[ndarray]) -> ndarray:
         accu = sum_wavs(accu, wav)
     return accu
     
-def stretch_stem(stem: type[Stem], new_bpm) -> type[Stem]:
+def stretch_stem(stem: Stem, new_bpm) -> Stem:
     """Stretch a stem to a new BPM.\n
     If the stem is marked as doubletime or halftime it will also be cut in half or repeated twice respectively."""
     wav = stem.wav
@@ -157,14 +158,14 @@ def stretch_stem(stem: type[Stem], new_bpm) -> type[Stem]:
         stem.song_name, new_bpm, stem.key, stem.mode, wav=wav_stretch, sr=stem.sr,
         halftime=stem.halftime, doubletime=stem.doubletime)
 
-def get_stem_type(stem: type[Stem]) -> type:
+def get_stem_type(stem: Stem) -> type:
     """Get the type of stem of a stem"""
     try:
         return globals()[stem.string]
     except:
         return Stem
 
-def find_middle_bpm(stems: Iterable[type[Stem]], ignore_types=None) -> float:
+def find_middle_bpm(stems: list[Stem], ignore_types=None):
     """Find the median BPM in a list of stems. Ignores `Bass` and `Other` stems by default. Pass `ignore_types` to change this."""
     if ignore_types is None:
         ignore_types = [Bass, Other]
@@ -204,7 +205,7 @@ def find_middle_bpm(stems: Iterable[type[Stem]], ignore_types=None) -> float:
                 stem.bpm = stem.bpm * 2
     return np.median(best_tempo_list)
 
-def find_middle_key(stems: Iterable[type[Stem]], ignore_types=None) -> int:
+def find_middle_key(stems: Iterable[Stem], ignore_types=None) -> int:
     """Find the key that minimizes the maximum distance to any of the stems. Ignores `Bass` stems by default. Pass `ignore_types` to change this."""
     if ignore_types is None:
         ignore_types = [Bass]
@@ -233,7 +234,7 @@ def sum_wavs(wav1: ndarray, wav2: ndarray) -> ndarray:
         shorter = np.pad(shorter, ((0, diff), (0, 0)))
     return shorter + longer
     
-def transpose_stem(stem: type[Stem], new_key: int) -> type[Stem]:
+def transpose_stem(stem: Stem, new_key: int) -> Stem:
     """Transpose a stem to a new key, unless the stem is marked as pitchless"""
     if stem.pitchless:
         return stem
@@ -247,7 +248,7 @@ def transpose_stem(stem: type[Stem], new_key: int) -> type[Stem]:
     return stemType(stem.song_name, stem.bpm, new_key, stem.mode, wav=new_wav, sr=stem.sr,
             halftime=stem.halftime, doubletime=stem.doubletime)
 
-def merge_same_bpm_and_key(stems: Iterable[type[Stem]]) -> list[Stem]:
+def merge_same_bpm_and_key(stems: Iterable[Stem]) -> list[Stem]:
     new_stems = []
     groups = defaultdict(list)
     for stem in stems:
@@ -362,9 +363,9 @@ def get_song_name(song_path):
         infos = json.load(info_file)
     return infos["name"]
     
-def load_random_stem(stem_type: str = None):
+def load_random_stem(stem_type: str|None = None):
     paths = STEM_PATHS.copy()
-    np.random.shuffle(paths)
+    np.random.shuffle(paths) #type: ignore
     if stem_type is None:
         return load_stem(paths[0])
     for path in paths:
