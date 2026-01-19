@@ -18,3 +18,9 @@ I highly recommend to also define the following fields whenever applicable:
 - `key (string)`: Key of the song, for example "Eb"
 - `mode (string)`: Mode of the song; Currently only "Major" and "Minor" are supported
 - `pitchless (list of strings)`: A list of all stems that should *not* get pitch shifted. If this field is not provided, the "Drums" track is considered pitchless by default. If your song has exclusively rap vocals with no sung parts, I recommend to include the "Vocals" track in this list.
+
+## Ideas
+- Rewrite for more proper procedural generation (engines that fill in a structure, see dennis martensson)
+- FX engine (inserts transition risers etc)
+- Load all song metadata into memory (can pick songs with closer bpm and key easier)
+- Loudness Normalization on the fly

@@ -267,17 +267,13 @@ def merge_same_bpm_and_key(stems: Iterable[type[Stem]]) -> list[Stem]:
     return new_stems
 
 
-def mashup_stems(stems: Iterable[type[Stem]], bpm=None, key:int=None, start=0, end=1) -> Mashup:
+def mashup_stems(stems: list[Stem], bpm=.0, key: int|None=None, start=0, end=1) -> Mashup:
     """`song_length`:\tMashup length as a fraction of 32 bars\n
     `start, end`:\tStarting and end point of the mashups as a fraction of 32 bars"""
-    if bpm is None:
-        bpm = find_middle_bpm(stems)
-    if key is None:
-        key = find_middle_key(stems)
-    if start >= 1 or end <= 0:
-        raise ValueError("Start point must be within [0, 1); end point must be within (0, 1])")
-    if start >= end:
-        raise ValueError("Starting point must be before the end point")
+    if bpm == .0:               bpm = find_middle_bpm(stems)
+    if key is None:             key = find_middle_key(stems)
+    if start >= 1 or end <= 0:  raise ValueError("Start point must be within [0, 1); end point must be within (0, 1])")
+    if start >= end:            raise ValueError("Starting point must be before the end point")
 
     original_stems = stems.copy()
     stems = merge_same_bpm_and_key(stems)
@@ -311,25 +307,18 @@ def vocalswap_mashup(instr:str, acap:str, balances=[1]*4, **kwargs):
             pass            
     return mashup_stems(stems, **kwargs)
     
-def random_mashup(types_to_generate:list[list[str]]=None, predefined_stems:list[Stem]=None, **kwargs):
+def random_mashup(generate_stem_groups: list[list[str]]|None=None, predefined_stems: list[Stem]|None=None, **kwargs):
     """
-    `types_to_generate`: Nested list of stem types. Stem types in the same list will be picked from the same song. Default: `[["Drums", "Bass"], ["Other"], ["Vocals"]]`\n
+    `generate_stem_groups`: Nested list of stem types. Stem types in the same list will be picked from the same song. Default: `[["Drums", "Bass"], ["Other"], ["Vocals"]]`\n
     `predefined_stems`: Fixed stems. Exclude these from `types_to_generate` to avoid duplicates. Default: `None`\n
     """
-    if types_to_generate is None: types_to_generate = [["Drums"], ["Bass", "Other"], ["Vocals"]]
+    if generate_stem_groups is None: generate_stem_groups = [["Drums"], ["Bass", "Other"], ["Vocals"]]
     if predefined_stems is None: predefined_stems = []
 
     stems = [stem.copy() for stem in predefined_stems]
-    for stem_type_list in types_to_generate:
-        song_names = [stem.song_name for stem in stems]
-        song_path = np.random.choice(SONG_PATHS)
-        while get_song_name(song_path) in song_names:
-            song_path = np.random.choice(SONG_PATHS)
-        for stem_type in stem_type_list:
-            stem_path = os.path.join(song_path, f"{stem_type}.wav")
-            if not os.path.exists(stem_path):
-                continue
-            stems.append(load_stem(stem_path))
+    for stem_types in generate_stem_groups:
+        exclude_songs = [stem.song_name for stem in stems]
+        stems.extend(load_random_stem_group(stem_types, exclude_songs))
     return mashup_stems(stems, **kwargs)
 
 def get_random_instrumental_path() -> str:
@@ -382,6 +371,30 @@ def load_random_stem(stem_type: str = None):
         if get_stem_string(path).lower() == stem_type.lower():
             return load_stem(path)
     raise Exception(f'No stems of type \"{stem_type}\" were found')
+
+def load_random_stem_group(stem_types: list[str]|None=None, exclude_songs: list[str]|None=None) -> list[Stem]:
+    """
+    Loads stems from a random song
+
+    :param stem_types: Stem types to load. Not all are guaranteed to be present in the selected song, but at least one returned stem is guaranteed.
+    :param exclude_songs: Song list to exclude from random selection
+    :return: Stems loaded from a random song
+    :rtype: list[Stem]
+    """
+    if stem_types is None or len(stem_types) == 0: stem_types = ["Drums", "Vocals", "Bass", "Other"]
+    if exclude_songs is None: exclude_songs = []
+
+    stems = []
+    while len(stems) == 0:
+        song_path = np.random.choice(SONG_PATHS)
+        while get_song_name(song_path) in exclude_songs:
+            song_path = np.random.choice(SONG_PATHS)
+        for stem_type in stem_types:
+            stem_path = os.path.join(song_path, f"{stem_type}.wav")
+            if not os.path.exists(stem_path):
+                continue
+            stems.append(load_stem(stem_path))
+    return stems
 
 def get_optional_values(song_dict):
     try:
@@ -495,9 +508,9 @@ def main():
     print(f"Using seed {seed}")
     # infinite_random_mashup(vocalswap=True, n_segments=1)
     infinite_random_mashup(n_segments=4, 
-                           predefined_stems=[load_stem(find_stem("croc", "vocals"), 0.8), load_stem(find_stem("the less", "drums"))], 
-                           types_to_generate=[["Bass", "Other"]],
-                           bpm=116,
+                           predefined_stems=[load_stem(find_stem("monitor", "bass")), load_stem(find_stem("monitor", "other"))], 
+                           generate_stem_groups=[["Drums"], ["Vocals"]],
+                           bpm=132,
                            key=KEYS["D"])
 
 if __name__ == "__main__":
