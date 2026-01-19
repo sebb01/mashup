@@ -290,31 +290,15 @@ def mashup_stems(stems: list[Stem], bpm=.0, key: int|None=None, start=0, end=1) 
 
     mashup_wav = sum_wav_list([stem.wav for stem in transposed_stretched])
     return Mashup(mashup_wav, original_stems, bpm)
-
-def vocalswap_mashup(instr:str, acap:str, balances=[1]*4, **kwargs):
-    """`song_length`: Desired mashup length as a fraction of 32 bars"""
-    stem_paths = [
-        os.path.join(instr, "drums.wav"),
-        os.path.join(instr, "other.wav"),
-        os.path.join(instr, "bass.wav"),
-        os.path.join(acap, "vocals.wav"),
-    ]
-    stems = []
-    for path, balance in zip(stem_paths, balances):
-        try:
-            stems.append(load_stem(path, balance))
-        except:
-            print(f"{path} does not exist, so it won't be loaded.")
-            pass            
-    return mashup_stems(stems, **kwargs)
     
-def random_mashup(generate_stem_groups: list[list[str]]|None=None, predefined_stems: list[Stem]|None=None, **kwargs):
+def random_mashup(generate_stem_groups: list[list[str]]|None=None, predefined_stems: list[Stem]|None=None, vocalswap=False, **kwargs):
     """
     `generate_stem_groups`: Nested list of stem types. Stem types in the same list will be picked from the same song. Default: `[["Drums", "Bass"], ["Other"], ["Vocals"]]`\n
     `predefined_stems`: Fixed stems. Exclude these from `types_to_generate` to avoid duplicates. Default: `None`\n
     """
     if generate_stem_groups is None: generate_stem_groups = [["Drums"], ["Bass", "Other"], ["Vocals"]]
-    if predefined_stems is None: predefined_stems = []
+    if predefined_stems is None:     predefined_stems = []
+    if vocalswap:                    generate_stem_groups = [["Drums", "Bass", "Other"], ["Vocals"]]
 
     stems = [stem.copy() for stem in predefined_stems]
     for stem_types in generate_stem_groups:
@@ -336,12 +320,6 @@ def get_random_stem_path(stem_type: str) -> str:
         stem_path = os.path.join(song_path, f"{stem_type}.wav")
         if os.path.exists(stem_path): return song_path
     raise Exception(f'Could not find a "{stem_type}" stem after looking through {i+1} song folders')
-
-def random_vocalswap_mashup(_=None, **kwargs):
-    # dummy argument is a workaround so that this function can be used interchangeably with random_mashup
-    instr = get_random_instrumental_path()
-    acap = get_random_stem_path("vocals")
-    return vocalswap_mashup(instr, acap, **kwargs)
 
 def make_mashup_name(stems):
     names = [stem.song_name for stem in stems]
@@ -390,10 +368,23 @@ def load_random_stem_group(stem_types: list[str]|None=None, exclude_songs: list[
         song_path = np.random.choice(SONG_PATHS)
         while get_song_name(song_path) in exclude_songs:
             song_path = np.random.choice(SONG_PATHS)
-        for stem_type in stem_types:
-            stem_path = os.path.join(song_path, f"{stem_type}.wav")
-            if not os.path.exists(stem_path):
-                continue
+        stems = load_stem_group(song_path, stem_types)
+    return stems
+
+def load_stem_group(song_path: str, stem_types: list[str]|None=None) -> list[Stem]:
+    """
+    Loads stems from a song
+
+    :param stem_types: Stem types to load. Not all are guaranteed to be present in the selected song.
+    :return: Specified stems from the song
+    :rtype: list[Stem]
+    """
+    if stem_types is None or len(stem_types) == 0: stem_types = ["Drums", "Vocals", "Bass", "Other"]
+
+    stems = []
+    for stem_type in stem_types:
+        stem_path = os.path.join(song_path, f"{stem_type}.wav")
+        if os.path.exists(stem_path):
             stems.append(load_stem(stem_path))
     return stems
 
@@ -425,13 +416,12 @@ def load_stem(file, balance=0.5):
     return stem_constructor(infos["name"], infos["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
     
 
-def infinite_random_mashup(n_segments=4, vocalswap=False, **kwargs):
+def infinite_random_mashup(n_segments=4, **kwargs):
     """Play random mashups indefinitely\n
     `vocalswap`: Whether all instrumental sources should come from the same song\n
     `n_segments`: Number of segments that one mashup should have.
     This means each song will be trimmed to `1/n_segments` of its length.
     """
-    mashup_func = random_vocalswap_mashup if vocalswap else random_mashup
     print("Generating first mashup, please wait...\nPress 's' to skip a mashup segment\n")
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
     player, track_duration = None, None
@@ -441,7 +431,7 @@ def infinite_random_mashup(n_segments=4, vocalswap=False, **kwargs):
         if end == 0: end = 1
         kwargs['start'] = start; kwargs['end'] = end
         with ThreadPool() as pool:
-            result = pool.apply_async(mashup_func, kwds=kwargs)
+            result = pool.apply_async(random_mashup, kwds=kwargs)
             wait_or_skip(track_duration, player)
             mashup = result.get()
         player = AudioPlayer(mashup.wav, mashup.sr)
@@ -481,8 +471,8 @@ def find_song(name: str) -> str:
     else:
         raise FileNotFoundError(f"No song found matching '{name}'")
 
-def find_stem(song_name: str, stem_name: str):
-    return os.path.join(find_song(song_name), stem_name + ".wav")
+def find_stem(song_name: str, stem_type: str):
+    return os.path.join(find_song(song_name), stem_type + ".wav")
 
 def print_now_playing(mashup: Mashup):
     print(f"Now playing:\t{mashup.description()}")
@@ -495,9 +485,11 @@ def quick_mashup(drums=None, bass=None, other=None, vocals=None, balances=[1]*4,
             stems.append(load_stem(find_stem(stem_str, stem_type), balance))
     play_mashup(mashup_stems(stems, **kwargs))
 
-def quick_vocalswap_mashup(instr, acap, **kwargs):
+def quick_vocalswap_mashup(instr: str, acap: str, **kwargs):
     print(loading_message())
-    play_mashup(vocalswap_mashup(find_song(instr), find_song(acap), **kwargs))
+    stems =      load_stem_group(find_song(instr), stem_types=["Drums", "Bass", "Other"])
+    stems.extend(load_stem_group(find_song(acap),  stem_types=["Vocals"]))
+    play_mashup(mashup_stems(stems, **kwargs))
 
 def loading_message():
     return "Preparing Mashup..."
