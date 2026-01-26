@@ -53,8 +53,8 @@ class Stem:
         self.wav = wav
 
         try:
-            ls = [s.capitalize() for s in pitchless]
-            self.pitchless = self.string in ls
+            pitchless_stems = [stem_type_name.capitalize() for stem_type_name in pitchless]
+            self.pitchless = self.string.capitalize() in pitchless_stems
         except:
             self.pitchless = self.string == "Drums"
 
