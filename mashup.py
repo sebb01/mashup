@@ -7,7 +7,7 @@ import json
 import pathlib
 from collections import defaultdict
 from collections.abc import Iterable
-import warnings
+from warnings import warn
 from multiprocessing.pool import ThreadPool
 import re
 import time
@@ -29,7 +29,7 @@ SONG_PATHS = [entry.path for entry in os.scandir(SONGDIR) if entry.is_dir()]
 KEYS = {'A':0, 'Bb':1, 'B':2, 'C':3, 'Db':4, 'D':5, 'Eb':6, 'E':7, 'F':8, 'Gb':9, 'G':10, 'Ab': 11}
 MODES = ('Minor', 'Major')
 N_BEATS = 32*4 # Number of bars in each song. All songs provided in the songs folder should be trimmed to this number.
-    
+
 class Stem:
     """Class that holds the audio data and attributes of one stem of a song"""
     def __init__(self, song_name, bpm, key, mode, pitchless=["Drums"], wav: np.ndarray|None=None, sr=44100, path=None, halftime=False, doubletime=False, balance=0.5):
@@ -59,8 +59,9 @@ class Stem:
             self.pitchless = self.string == "Drums"
 
         if not self.pitchless and self.mode not in MODES:
-            warnings.warn(f'\"{self.mode}\" is neither Major nor Minor. Stem \"{self.string}\" of \"{self.song_name}\" '+
-                f'will only be mashed up with other Stems that use the \"{self.mode}\" mode.')
+            warn(f'\"{self.mode}\" is not a recognized mode. Stem \"{self.string}\" of \"{self.song_name}\" '+
+                f'will will be treated as Minor.')
+            self.mode = "Minor"
         
         # Treat major keys as their relative minor counterparts
         if self.mode == "Major":
@@ -129,10 +130,17 @@ class Mashup:
         for stem in self.stems:
             s = s + str(stem) + "\n"
         return s
+    
+    def print_now_playing(self):
+        print(f"Now playing:\t{self.description()}")
         
     
 def sum_wav_list(wavs: list[ndarray]) -> ndarray:
-    """Sum a list of audio arrays into one audio array"""
+    """Sum a list of audio arrays into one audio array.
+
+    :param wavs: List of numpy arrays representing audio (shape: samples x channels).
+    :return: A single numpy array which is the sample-wise sum of all inputs.
+    """
     accu = wavs[0]
     if len(wavs) <= 1:
         return accu
@@ -141,8 +149,15 @@ def sum_wav_list(wavs: list[ndarray]) -> ndarray:
     return accu
     
 def stretch_stem(stem: Stem, new_bpm) -> Stem:
-    """Stretch a stem to a new BPM.\n
-    If the stem is marked as doubletime or halftime it will also be cut in half or repeated twice respectively."""
+    """Stretch a stem to a new BPM.
+
+    If the stem is marked as `doubletime` the audio will be cut in half before stretching.
+    If the stem is marked as `halftime` the stretched audio will be repeated twice.
+
+    :param stem: The input :class:`Stem` to stretch.
+    :param new_bpm: Target beats-per-minute to stretch the stem to.
+    :return: A new :class:`Stem` instance containing the stretched audio.
+    """
     wav = stem.wav
     old_bpm = stem.bpm
     ratio = new_bpm/old_bpm
@@ -159,14 +174,29 @@ def stretch_stem(stem: Stem, new_bpm) -> Stem:
         halftime=stem.halftime, doubletime=stem.doubletime)
 
 def get_stem_type(stem: Stem) -> type:
-    """Get the type of stem of a stem"""
+    """Return the concrete Stem subclass type for a given stem.
+
+    :param stem: A :class:`Stem` instance.
+    :return: The class (type) corresponding to the stem's `string` attribute, or
+             :class:`Stem` if no matching class is found in globals().
+    """
     try:
         return globals()[stem.string]
     except:
         return Stem
 
 def find_middle_bpm(stems: list[Stem], ignore_types=None):
-    """Find the median BPM in a list of stems. Ignores `Bass` and `Other` stems by default. Pass `ignore_types` to change this."""
+    """Find the median BPM in a list of stems.
+
+    The algorithm considers doubling or halving individual stem tempi to minimize
+    the standard deviation across the selected tempos. By default `Bass` and
+    `Other` types are ignored when computing the candidate BPMs.
+
+    :param stems: List of :class:`Stem` instances to analyze.
+    :param ignore_types: Optional list of Stem classes to ignore when computing.
+    :return: The median BPM (float) selected for the group. Side-effects: may
+             set `halftime` or `doubletime` flags on the provided stems.
+    """
     if ignore_types is None:
         ignore_types = [Bass, Other]
 
@@ -206,7 +236,13 @@ def find_middle_bpm(stems: list[Stem], ignore_types=None):
     return np.median(best_tempo_list)
 
 def find_middle_key(stems: Iterable[Stem], ignore_types=None) -> int:
-    """Find the key that minimizes the maximum distance to any of the stems. Ignores `Bass` stems by default. Pass `ignore_types` to change this."""
+    """Find a key (0-11) that minimizes the maximum circular semitone distance
+    to any non-pitchless stem in the provided list.
+
+    :param stems: Iterable of :class:`Stem` instances to consider.
+    :param ignore_types: Optional list of Stem classes to ignore (default ignores Bass).
+    :return: Integer key in range 0-11 representing the chosen semitone key.
+    """
     if ignore_types is None:
         ignore_types = [Bass]
 
@@ -223,7 +259,12 @@ def find_middle_key(stems: Iterable[Stem], ignore_types=None) -> int:
     return best_key
 
 def sum_wavs(wav1: ndarray, wav2: ndarray) -> ndarray:
-    """Sum two audio arrays"""
+    """Sum two audio arrays, padding the shorter to the length of the longer.
+
+    :param wav1: First audio numpy array (samples x channels).
+    :param wav2: Second audio numpy array (samples x channels).
+    :return: The element-wise sum of the two arrays, padded as necessary.
+    """
     shorter = wav1
     longer = wav2
     if len(wav1) > len(wav2):
@@ -235,7 +276,15 @@ def sum_wavs(wav1: ndarray, wav2: ndarray) -> ndarray:
     return shorter + longer
     
 def transpose_stem(stem: Stem, new_key: int) -> Stem:
-    """Transpose a stem to a new key, unless the stem is marked as pitchless"""
+    """Transpose a stem to a new key unless the stem is pitchless.
+
+    The function chooses the shortest semitone direction (up or down) and
+    performs a pitch shift using `pyrubberband`.
+
+    :param stem: The :class:`Stem` to transpose.
+    :param new_key: Target key as an integer (semitones, 0-11).
+    :return: A new :class:`Stem` instance with audio pitch-shifted to `new_key`.
+    """
     if stem.pitchless:
         return stem
     semitones = new_key - stem.key
@@ -269,8 +318,15 @@ def merge_same_bpm_and_key(stems: Iterable[Stem]) -> list[Stem]:
 
 
 def mashup_stems(stems: list[Stem], bpm=.0, key: int|None=None, start=0, end=1) -> Mashup:
-    """`song_length`:\tMashup length as a fraction of 32 bars\n
-    `start, end`:\tStarting and end point of the mashups as a fraction of 32 bars"""
+    """Create a mashup from a list of stems.
+
+    :param stems: List of :class:`Stem` objects to include in the mashup.
+    :param bpm: Optional target BPM. If 0.0, the function computes a middle BPM.
+    :param key: Optional target key (int). If None, the function computes a middle key.
+    :param start: Fraction (0-1) of each stem to treat as the segment start.
+    :param end: Fraction (0-1] of each stem to treat as the segment end.
+    :return: A :class:`Mashup` instance containing the combined audio and metadata.
+    """
     if bpm == .0:               bpm = find_middle_bpm(stems)
     if key is None:             key = find_middle_key(stems)
     if start >= 1 or end <= 0:  raise ValueError("Start point must be within [0, 1); end point must be within (0, 1])")
@@ -292,9 +348,15 @@ def mashup_stems(stems: list[Stem], bpm=.0, key: int|None=None, start=0, end=1) 
     return Mashup(mashup_wav, original_stems, bpm)
     
 def random_mashup(generate_stem_groups: list[list[str]]|None=None, predefined_stems: list[Stem]|None=None, vocalswap=False, **kwargs):
-    """
-    `generate_stem_groups`: Nested list of stem types. Stem types in the same list will be picked from the same song. Default: `[["Drums", "Bass"], ["Other"], ["Vocals"]]`\n
-    `predefined_stems`: Fixed stems. Exclude these from `types_to_generate` to avoid duplicates. Default: `None`\n
+    """Generate a random mashup composed from random stems.
+
+    :param generate_stem_groups: Nested list of stem type groups. Types in the same
+                                 sublist will be picked from a single song. Default
+                                 is `[["Drums"], ["Bass", "Other"], ["Vocals"]]`.
+    :param predefined_stems: Optional list of fixed :class:`Stem` objects to include.
+    :param vocalswap: If True, pick all instrumental sources from the same song.
+    :param kwargs: Additional keyword arguments forwarded to :func:`mashup_stems`.
+    :return: A :class:`Mashup` instance representing the generated mashup.
     """
     if generate_stem_groups is None: generate_stem_groups = [["Drums"], ["Bass", "Other"], ["Vocals"]]
     if predefined_stems is None:     predefined_stems = []
@@ -334,14 +396,33 @@ def stem_length(wav, sr):
     return len(wav) / samples_per_ns
 
 def get_stem_string(file_path):
+    """Return the stem name (string) extracted from a file path.
+
+    Example: `/path/to/Drums.wav` -> `Drums`.
+
+    :param file_path: Path to a stem file.
+    :return: Capitalized stem name without extension.
+    """
     return os.path.split(file_path)[1][:-4].capitalize()
 
 def get_song_name(song_path):
+    """Read the `info.json` for a song and return its declared name.
+
+    :param song_path: Path to the song directory containing `info.json`.
+    :return: The `name` field from the song's `info.json`.
+    """
     with open(os.path.join(song_path, "info.json"), encoding='utf-8') as info_file:
         infos = json.load(info_file)
     return infos["name"]
     
 def load_random_stem(stem_type: str|None = None):
+    """Load a random stem file, optionally filtering by stem type.
+
+    :param stem_type: Optional stem name to look for (e.g. `Drums`, `Vocals`).
+                      If None, a random stem file is returned.
+    :return: A :class:`Stem` instance loaded from a randomly chosen file.
+    :raises Exception: If no matching stem of the requested type is found.
+    """
     paths = STEM_PATHS.copy()
     np.random.shuffle(paths) #type: ignore
     if stem_type is None:
@@ -349,7 +430,7 @@ def load_random_stem(stem_type: str|None = None):
     for path in paths:
         if get_stem_string(path).lower() == stem_type.lower():
             return load_stem(path)
-    raise Exception(f'No stems of type \"{stem_type}\" were found')
+    raise Exception(f'No stems of type "{stem_type}" were found')
 
 def load_random_stem_group(stem_types: list[str]|None=None, exclude_songs: list[str]|None=None) -> list[Stem]:
     """
@@ -388,16 +469,16 @@ def load_stem_group(song_path: str, stem_types: list[str]|None=None) -> list[Ste
             stems.append(load_stem(stem_path))
     return stems
 
-def get_optional_values(song_dict):
+def get_optional_values(song_dict: dict):
     try:
-        key = song_dict["key"]
+        key = KEYS[song_dict["key"]]
     except KeyError:
-        key = "A"
-
+        key = None
+        
     try:
         mode = song_dict["mode"]
     except KeyError:
-        mode = "Minor"
+        mode = ""
 
     try:
         pitchless = song_dict["pitchless"]
@@ -406,21 +487,34 @@ def get_optional_values(song_dict):
 
     return key, mode, pitchless
 
-def load_stem(file, balance=0.5):
-    directory = os.path.split(file)[0]
-    with open(os.path.join(directory, "info.json"), encoding='utf-8') as info_file:
-        infos = json.load(info_file)
-    stem_string = get_stem_string(file)
+def load_stem(path: pathlib.Path|str, balance=0.5) -> Stem|None:
+    """Load a stem from a file path using metadata from the song's `info.json`.
+
+    :param path: Path to the stem WAV file.
+    :param balance: Multiplier applied to the stem audio when loading (default 0.5).
+    :return: Constructed :class:`Stem` instance (or subclass) or None on failure.
+    """
+    directory = os.path.split(path)[0]
+    info_path = os.path.join(directory, "info.json")
+    try:
+        with open(info_path, encoding='utf-8') as info_file:
+            infos = json.load(info_file)
+    except Exception as e:
+        warn(str(e))
+        return
+    stem_string = get_stem_string(path)
     stem_constructor = globals()[stem_string]
     key, mode, pitchless = get_optional_values(infos)
-    return stem_constructor(infos["name"], infos["bpm"], KEYS[key], mode, pitchless=pitchless, path=file, balance=balance)
+    return stem_constructor(infos["name"], infos["bpm"], key, mode, pitchless=pitchless, path=path, balance=balance)
     
 
 def infinite_random_mashup(n_segments=4, **kwargs):
-    """Play random mashups indefinitely\n
-    `vocalswap`: Whether all instrumental sources should come from the same song\n
-    `n_segments`: Number of segments that one mashup should have.
-    This means each song will be trimmed to `1/n_segments` of its length.
+    """Play random mashups indefinitely.
+
+    :param n_segments: Number of segments per mashup; each source is trimmed to
+                       `1/n_segments` of its length for each segment.
+    :param kwargs: Additional keyword arguments forwarded to :func:`random_mashup`.
+    :return: This function runs indefinitely until interrupted.
     """
     print("Generating first mashup, please wait...\nPress 's' to skip a mashup segment\n")
     # TODO: prepare a queue of a couple of mashups with the thread pool, for smoother skipping
@@ -436,19 +530,28 @@ def infinite_random_mashup(n_segments=4, **kwargs):
             mashup = result.get()
         player = AudioPlayer(mashup.wav, mashup.sr)
         player.start()
-        print_now_playing(mashup)
+        mashup.print_now_playing()
         track_duration = N_BEATS / n_segments / mashup.bpm * 60
         
 
 def play_mashup(mashup: Mashup, print_info = True):
-    if print_info: print_now_playing(mashup)
+    """Play a :class:`Mashup` using an `AudioPlayer`.
+
+    :param mashup: The :class:`Mashup` instance to play.
+    :param print_info: Whether to print now-playing information (default True).
+    """
+    if print_info: mashup.print_now_playing()
     player = AudioPlayer(mashup.wav, mashup.sr)
     player.start()
     player.join()
 
 def wait_or_skip(track_duration, play_object):
-    """Wait for a track to finish playing, skip the wait if user presses `s`\n
-    Returns: `skipped`: Whether user skipped the track"""
+    """Wait for a currently-playing track to finish, or skip if user presses `s`.
+
+    :param track_duration: Duration of the track in seconds.
+    :param play_object: Playback object with a `.stop()` method (or None).
+    :return: `True` if the user skipped playback, `False` if playback completed.
+    """
     if play_object is None: return False
     track_duration -= 0.04 # Don't ask me why this has to be here but it does
     start = time.perf_counter()
@@ -464,6 +567,12 @@ def wait_or_skip(track_duration, play_object):
         time.sleep(0.001)  # Sleep to reduce CPU usage
 
 def find_song(name: str) -> str:
+    """Find a song directory whose path matches `name`.
+
+    :param name: Substring to match against file/directory names under `SONGDIR`.
+    :return: Path to the first matching location as a string.
+    :raises FileNotFoundError: If no match is found.
+    """
     # TODO support search through song name metadata
     matches = list(pathlib.Path(SONGDIR).rglob(f"*{name}*"))
     if matches:
@@ -472,12 +581,24 @@ def find_song(name: str) -> str:
         raise FileNotFoundError(f"No song found matching '{name}'")
 
 def find_stem(song_name: str, stem_type: str):
+    """Return the filesystem path to a stem WAV file for a song.
+
+    :param song_name: Name or substring to locate the song directory.
+    :param stem_type: Stem filename (without extension), e.g. `drums`, `vocals`.
+    :return: Path to the stem WAV file.
+    """
     return os.path.join(find_song(song_name), stem_type + ".wav")
 
-def print_now_playing(mashup: Mashup):
-    print(f"Now playing:\t{mashup.description()}")
-
 def quick_mashup(drums=None, bass=None, other=None, vocals=None, balances=[1]*4, **kwargs):
+    """Quick helper to build and play a mashup from named stems.
+
+    :param drums: Song name for drums stem (or None).
+    :param bass: Song name for bass stem (or None).
+    :param other: Song name for other stem (or None).
+    :param vocals: Song name for vocals stem (or None).
+    :param balances: List of per-stem balance multipliers.
+    :param kwargs: Forwarded to :func:`mashup_stems`.
+    """
     print(loading_message())
     stems = []
     for stem_str, stem_type, balance in zip([drums, bass, other, vocals], ["drums", "bass", "other", "vocals"], balances):
@@ -486,6 +607,12 @@ def quick_mashup(drums=None, bass=None, other=None, vocals=None, balances=[1]*4,
     play_mashup(mashup_stems(stems, **kwargs))
 
 def quick_vocalswap_mashup(instr: str, acap: str, **kwargs):
+    """Quick helper: take instrumentals from one song and vocals from another.
+
+    :param instr: Song name providing instrumental stems.
+    :param acap: Song name providing vocal stems (acapella).
+    :param kwargs: Forwarded to :func:`mashup_stems`.
+    """
     print(loading_message())
     stems =      load_stem_group(find_song(instr), stem_types=["Drums", "Bass", "Other"])
     stems.extend(load_stem_group(find_song(acap),  stem_types=["Vocals"]))
