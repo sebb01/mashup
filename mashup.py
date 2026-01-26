@@ -622,15 +622,15 @@ def loading_message():
     return "Preparing Mashup..."
 
 def main():
-    # quick_vocalswap_mashup("photo", "sebb rem")
     seed = np.random.randint(low=0, high=999999)
     np.random.seed(seed)
     print(f"Using seed {seed}")
-    # infinite_random_mashup(vocalswap=True, n_segments=1)
-    infinite_random_mashup(n_segments=4, 
-                           predefined_stems=[load_stem(find_stem("monitor", "bass")), load_stem(find_stem("monitor", "other"))], 
-                           generate_stem_groups=[["Drums"], ["Vocals"]],
-                           bpm=132,
+    infinite_random_mashup(n_segments=8, 
+                           predefined_stems=[load_random_stem("drums")],
+                           #predefined_stems=[load_stem(find_stem("love", "drums"), 0.4), load_stem(find_stem("love", "bass"), 0.37), load_stem(find_stem("love", "other"), 0.3)], 
+                           #generate_stem_groups=[["Vocals"]],
+                           generate_stem_groups=[["Vocals"], ["Bass", "Other"]],
+                           bpm=116,
                            key=KEYS["D"])
 
 if __name__ == "__main__":
